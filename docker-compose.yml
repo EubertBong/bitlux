@@ -1,0 +1,36 @@
+## Local development stack for the Bitlux CRM backend.
+##
+## Host port is 5433 (not 5432) because a local PostgreSQL instance is commonly
+## already bound to 5432. The container still listens on 5432 internally.
+##
+## Production runs on Neon (PostgreSQL 16 + PostGIS). Local dev deliberately has
+## NO PostGIS -- see DATA_MODEL.md 1.4 for the geometry tradeoff this forces.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: bitlux-crm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bitlux
+      POSTGRES_PASSWORD: bitlux
+      POSTGRES_DB: bitlux_crm
+      # Deterministic collation so index ordering matches across machines.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - bitlux_pgdata:/var/lib/postgresql/data
+      # Creates the non-superuser bitlux_app role. POSTGRES_USER is a SUPERUSER
+      # and superusers bypass RLS unconditionally, so isolation can only be
+      # exercised as a separate role. Runs once, on first volume init.
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bitlux -d bitlux_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  bitlux_pgdata:
