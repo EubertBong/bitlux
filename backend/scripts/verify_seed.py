@@ -15,7 +15,7 @@ import sys
 import uuid
 
 from _db import connect, enter_tenant
-from seed import AIRPORTS, DEMO, FBOS, MANUFACTURERS, MODELS, ORDER, expected_counts, tenant_filter
+from seed import AIRPORTS, DEMO, FBOS, MANUFACTURERS, MODELS, ORDER, expected_counts, tenant_filter, u
 
 FAILS: list[str] = []
 
@@ -38,7 +38,13 @@ async def main() -> int:
             expected = expected_counts()
             mismatches = []
             for table in ORDER:
-                got = await conn.fetchval(f"SELECT count(*) FROM {table} WHERE {tenant_filter(table)} = $1", DEMO)
+                if table == "audit_logs":
+                    # Real logins append audit rows to the demo tenant, so count only the
+                    # seed's own (deterministic-id) rows rather than the table.
+                    got = await conn.fetchval("SELECT count(*) FROM audit_logs WHERE client_id = $1 AND id = ANY($2::uuid[])",
+                                              DEMO, [u(f"audit:{i}") for i in range(expected["audit_logs"])])
+                else:
+                    got = await conn.fetchval(f"SELECT count(*) FROM {table} WHERE {tenant_filter(table)} = $1", DEMO)
                 if got != expected[table]:
                     mismatches.append(f"{table}: expected {expected[table]}, got {got}")
             report("tenant tables match seed.expected_counts()",

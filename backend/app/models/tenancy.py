@@ -1,13 +1,14 @@
 """Tenancy: the tenant root and its users (DATA_MODEL.md 3.1)."""
 
+import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import Boolean, CHAR, Column, Index, text, Text, TIMESTAMP
-from sqlalchemy.dialects.postgresql import CITEXT, JSONB
+from sqlalchemy import Boolean, CHAR, CheckConstraint, Column, ForeignKey, Index, Text, text, TIMESTAMP
+from sqlalchemy.dialects.postgresql import CITEXT, INET, JSONB, UUID
 from sqlmodel import Field, Relationship
 
-from .base import BitluxBase, IdMixin, TenantScopedMixin, TimestampMixin, pg_enum, tenant_indexes
+from .base import BitluxBase, IdMixin, TenantScopedMixin, TimestampMixin, pg_enum, tenant_indexes, utcnow
 from .enums import ClientStatus, UserRole, UserStatus
 
 
@@ -62,5 +63,34 @@ class User(BitluxBase, TenantScopedMixin, table=True):
     auth_subject: Optional[str] = Field(default=None, sa_column=Column("auth_subject", Text))
     mfa_enabled: bool = Field(default=False, sa_column=Column("mfa_enabled", Boolean, nullable=False, server_default=text("false")))
     last_login_at: Optional[datetime] = Field(default=None, sa_column=Column("last_login_at", TIMESTAMP(timezone=True)))
+    # Migration 016. argon2id hash; NULL = no password login. Never appears in a schema.
+    password_hash: Optional[str] = Field(default=None, sa_column=Column("password_hash", Text))
+    password_changed_at: Optional[datetime] = Field(default=None, sa_column=Column("password_changed_at", TIMESTAMP(timezone=True)))
 
     client: Optional["Client"] = Relationship(back_populates="users")
+
+
+class RefreshToken(BitluxBase, TenantScopedMixin, table=True):
+    """Refresh-token state for rotation and logout (migration 016). Holds a hash, never the token."""
+    __tablename__ = "refresh_tokens"
+    __table_args__ = (
+        *tenant_indexes("refresh_tokens"),
+        Index("uq_refresh_tokens_hash", "token_hash", unique=True),
+        Index("ix_refresh_tokens_user", "client_id", "user_id"),
+        Index("ix_refresh_tokens_active", "expires_at", postgresql_where=text("revoked_at IS NULL")),
+        CheckConstraint("expires_at > issued_at", name="ck_refresh_tokens_expiry"),
+        {"comment": "Refresh-token state for rotation and logout. Stores a hash, never the token."},
+    )
+
+    user_id: uuid.UUID = Field(sa_column=Column("user_id", UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False))
+    token_hash: str = Field(sa_column=Column("token_hash", Text, nullable=False))
+    issued_at: datetime = Field(default_factory=utcnow, sa_column=Column("issued_at", TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")))
+    expires_at: datetime = Field(sa_column=Column("expires_at", TIMESTAMP(timezone=True), nullable=False))
+    revoked_at: Optional[datetime] = Field(default=None, sa_column=Column("revoked_at", TIMESTAMP(timezone=True)))
+    replaced_by_id: Optional[uuid.UUID] = Field(default=None, sa_column=Column("replaced_by_id", UUID(as_uuid=True), ForeignKey("refresh_tokens.id", ondelete="SET NULL")))
+    user_agent: Optional[str] = Field(default=None, sa_column=Column("user_agent", Text))
+    ip_address: Optional[Any] = Field(default=None, sa_column=Column("ip_address", INET))
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None and self.expires_at > utcnow()

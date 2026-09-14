@@ -70,7 +70,7 @@ IDX  (client_id, id) WHERE deleted_at IS NULL     -- live-row covering probe
 | Enums | Native PG `ENUM`. Values are `snake_case`. Enums are **append-only** in migrations (`ALTER TYPE … ADD VALUE`); a value is never renamed or removed once shipped. |
 | JSONB | Used only for genuinely open-ended attribute bags (preferences, amenities, feature flags). Never for anything that gets filtered, joined, or reported on. |
 | Encryption | Fields marked **[enc]** are encrypted application-side (envelope encryption, tenant-scoped DEK), stored `bytea`, with a plaintext `*_last4` for display/search. Passport numbers, KTN, tax IDs, crew license numbers. |
-| Search | `search_tsv tsvector GENERATED ALWAYS AS (…) STORED` + GIN on the entity tables users type into (contacts, passengers, operators, aircraft, airports). |
+| Search | `search_tsv tsvector GENERATED ALWAYS AS (…) STORED` + GIN on the entity tables users type into (contacts, passengers, operators, aircraft, airports; manufacturers and aircraft models since 016). Trip and quote numbers use expression GIN indexes on `to_tsvector('simple', …)`. `/search` uses `websearch_to_tsquery` plus a prefix term; nothing uses `ILIKE`. |
 
 ### 1.3 Shared reference catalog
 
@@ -196,6 +196,7 @@ when you are not.
 | Ordinary tenant tables (36) | `SELECT, INSERT, UPDATE, DELETE` |
 | `audit_logs` | **`SELECT, INSERT` only.** No `UPDATE`, no `DELETE` (revoked from the role and from `PUBLIC` in 012, before the first partition exists). |
 | `audit_logs_*` partitions | **No direct privileges at all** — not even `SELECT`. Access is through the parent only; a partition has no RLS policy of its own. |
+| Cross-tenant reads | Exactly two, both `SECURITY DEFINER` functions owned by the schema owner and executable only by `bitlux_app`: `auth_lookup_user()` (016, login by email) and `search_ids()` (017, indexed full-text search — see "RLS and index usage" below). |
 | The invariant | **Migration 015 asserts** via `has_table_privilege('bitlux_app','audit_logs','UPDATE'/'DELETE')` that the above still holds at the end of the chain. `information_schema.role_table_grants` is deliberately *not* used: it lists direct grants only and misses privileges that arrive via `PUBLIC` or role membership — precisely how an accidental grant would arrive. |
 | RLS on every tenant table | `ENABLE` **and `FORCE ROW LEVEL SECURITY`**, so even a non-superuser owner is bound. Policies key on `current_client_id()`. |
 
@@ -277,6 +278,21 @@ With `app.client_id` unset this returns `NULL`, every policy predicate evaluates
 3. `audit_logs` is append-only for the app role at the privilege layer
    (migration 012, asserted by 015) and, for every role including the owner, by
    the trigger in migration 013.
+
+**RLS and index usage — the non-leakproof rule.** Policy quals are security barriers, and
+PostgreSQL will not evaluate a non-`LEAKPROOF` operator as an *index condition* beneath one. `=`
+on uuid is leakproof; `@@` (`ts_match_vq`), `ILIKE` and `~~` are not. Consequence, measured: for
+`bitlux_app`, `WHERE search_tsv @@ query` is always a sequential scan (≈15 ms at 50k rows), while
+the identical statement as the owner is a `Bitmap Index Scan` on the GIN index (0.04 ms). The
+GIN indexes are correct; RLS simply forbids the app role the path. Marking the catalog function
+leakproof needs superuser (not available on Neon) and edits `pg_catalog`, so instead `/search`
+goes through **`search_ids(type, tsquery, limit)`** (migration 017): the second and last
+deliberate `SECURITY DEFINER` read beside `auth_lookup_user()`. It runs with `row_security = off`,
+scopes by `current_client_id()` itself (the same trust root the policies use — an unset tenant
+returns nothing), contains no dynamic SQL (one static branch per whitelisted type), returns only
+`(id, rank)`, and the caller joins those ids from a statement that is still under RLS. Any future
+predicate that must be indexed for the app role and uses a non-leakproof operator needs the same
+treatment; a plain `WHERE` will silently seq-scan.
 
 **Verifying isolation.** Migration 014 applies `FORCE ROW LEVEL SECURITY` to every
 tenant table so that the non-superuser owner is bound too, but the only honest
@@ -435,11 +451,43 @@ users †
   auth_subject          text                                    -- external IdP subject
   mfa_enabled           boolean        NOT NULL DEFAULT false
   last_login_at         timestamptz
+  password_hash         text                                    -- 016: argon2id; NULL = no password login
+  password_changed_at   timestamptz                             -- 016
   UQ   (client_id, email) WHERE deleted_at IS NULL
   UQ   (auth_provider, auth_subject) WHERE auth_subject IS NOT NULL
   IDX  (client_id, role) WHERE deleted_at IS NULL
   IDX  (client_id, status)
 ```
+
+```
+refresh_tokens †                         (migration 016 — server-side state for refresh rotation + logout)
+  user_id               uuid           NOT NULL FK → users(id) ON DELETE CASCADE
+  token_hash            text           NOT NULL       -- sha256(token); the token itself is never stored
+  issued_at             timestamptz    NOT NULL DEFAULT now()
+  expires_at            timestamptz    NOT NULL
+  revoked_at            timestamptz                   -- NULL = live
+  replaced_by_id        uuid           FK → refresh_tokens(id) ON DELETE SET NULL  (rotation chain)
+  user_agent            text
+  ip_address            inet
+  CHK  expires_at > issued_at
+  UQ   (token_hash)
+  IDX  (client_id, user_id)
+  IDX  (expires_at) WHERE revoked_at IS NULL
+```
+
+Every refresh is a rotation: the presented token's row is revoked with `replaced_by_id` pointing at
+its successor. Presenting an already-revoked token is treated as replay and revokes every live
+token for that user. Logout revokes the presented token. Access tokens (15 min) are stateless JWTs;
+only refresh tokens (7 days) have rows.
+
+**`auth_lookup_user(email, client_slug)` — the one deliberate hole in tenant isolation.** Login has
+to find a user by email *before* any tenant is known, which RLS forbids the application role.
+Migration 016 adds a `SECURITY DEFINER` SQL function, owned by the schema owner, with
+`row_security = off`, that performs exactly that lookup and nothing else: it returns the user id,
+tenant id and slug, role, both statuses and the password hash. It is the only object `bitlux_app`
+may execute across tenants (`REVOKE ALL … FROM PUBLIC; GRANT EXECUTE … TO bitlux_app`). If the
+email exists in more than one tenant the API demands `client_slug`. Everything after login runs
+inside a normal tenant transaction under RLS.
 
 ### 3.2 CRM spine — Segments → Contacts → Passengers → Account Holders
 
@@ -646,8 +694,10 @@ manufacturers †                          (client_id NULLABLE — shared catalo
   logo_url              text
   founded_year          smallint
   is_active             boolean        NOT NULL DEFAULT true
+  search_tsv            tsvector       GENERATED (name, short_name, code) STORED     -- 016
   UQ   NULLS NOT DISTINCT (client_id, lower(name)) WHERE deleted_at IS NULL
   IDX  (lower(name))
+  IDX  USING GIN (search_tsv)                                                    -- 016
 ```
 
 ```
@@ -675,6 +725,8 @@ aircraft_models †                        (client_id NULLABLE — shared catalo
   production_start_year smallint
   production_end_year   smallint
   image_url             text
+  search_tsv            tsvector       GENERATED (name, family, icao_type_code) STORED  -- 016
+  IDX  USING GIN (search_tsv)                                                        -- 016
   UQ   NULLS NOT DISTINCT (client_id, manufacturer_id, lower(name)) WHERE deleted_at IS NULL
   IDX  (category, max_passengers)
   IDX  (icao_type_code)
@@ -909,6 +961,7 @@ trips †
   cancellation_reason   text
   CHK  status='cancelled' → cancelled_at IS NOT NULL
   UQ   (client_id, trip_number) WHERE deleted_at IS NULL
+  IDX  USING GIN (to_tsvector('simple', trip_number))       -- 016: /search by number, no ILIKE
   IDX  (client_id, status, departure_date) WHERE deleted_at IS NULL
   IDX  (client_id, account_holder_id, departure_date DESC)
   IDX  (client_id, owner_user_id, status)
@@ -1070,6 +1123,7 @@ quotes †                                 (immutable revisions: never edit a se
   pdf_document_id       uuid           FK → documents(id) ON DELETE SET NULL
   esign_envelope_id     text
   UQ   (client_id, quote_number, revision) WHERE deleted_at IS NULL
+  IDX  USING GIN (to_tsvector('simple', quote_number))      -- 016: /search by number
   UQ   (client_id, quote_number) WHERE is_current AND deleted_at IS NULL
   UQ   (trip_id) WHERE status='accepted' AND deleted_at IS NULL   -- one accepted quote per trip
   CHK  parent_quote_id <> id
@@ -1402,7 +1456,7 @@ entity_tags †                            (POLYMORPHIC)
    +--------+   +----------+  +-----------+        +-----------+  +----------+  +-----------+
    | users  |   | segments |  | operators |        |   trips   |  |documents |  |audit_logs |
    +--------+   +----------+  +-----------+        +-----------+  +----------+  +-----------+
-       |             |             |                     |             |          (partitioned
+       |  \_ refresh_tokens (016)                        |             |          (partitioned
        |             v             |                     v             v           by month,
        |        +----------+       |                +---------+   +----------+     append-only)
        |        | contacts |       |                |  legs   |   |document_ |

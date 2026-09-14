@@ -247,6 +247,9 @@ ORDER = [
     "entity_tags", "document_links", "audit_logs",
 ]
 
+# Every demo user logs in with this password (argon2id-hashed at seed time). Demo only.
+DEMO_PASSWORD = "Demo!2026"
+
 USERS = {  # key -> (email, name, role)
     "owner": ("owner@demo.test", "Olivia Grant", "owner"),
     "broker": ("broker@demo.test", "Ben Carter", "broker"),
@@ -457,6 +460,8 @@ def build(cat: Catalog) -> dict[str, list[dict]]:
                          "status": "active", "default_currency": "USD", "timezone": "America/New_York",
                          "billing_email": "billing@demo.test", "trip_number_prefix": "BLX",
                          "settings": {"quote_validity_days": 7, "deposit_percent": 50}})
+    from app.security.passwords import hash_password  # argon2id; app package is installed in the venv
+
     for k, (email, name, role) in USERS.items():
         given, family = name.split(" ", 1)
         # users is self-referential (created_by -> users): the bootstrap rows are
@@ -464,6 +469,7 @@ def build(cat: Catalog) -> dict[str, list[dict]]:
         R["users"].append(base(id=uid[k], email=email, full_name=name, given_name=given, family_name=family,
                                role=role, status="active", timezone="America/New_York", auth_provider="password",
                                mfa_enabled=(role == "owner"), last_login_at=ago(0, 3),
+                               password_hash=hash_password(DEMO_PASSWORD), password_changed_at=ago(30),
                                created_by=None, updated_by=None))
 
     # ---- documents (early: several FK columns point at them)

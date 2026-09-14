@@ -8,12 +8,12 @@ from datetime import date
 
 from sqlalchemy import case, func, select
 
-from app.models import Invoice
+from app.models import Invoice, InvoiceLineItem
 from app.models.enums import InvoiceStatus
 
 from .base import BaseRepository
 
-__all__ = ["InvoiceRepository", "AgingBucket", "AgingReport", "UNSETTLED", "AGING_BUCKETS"]
+__all__ = ["InvoiceRepository", "InvoiceLineItemRepository", "AgingBucket", "AgingReport", "UNSETTLED", "AGING_BUCKETS"]
 
 # Statuses that still owe money.
 UNSETTLED = (InvoiceStatus.ISSUED, InvoiceStatus.SENT, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.OVERDUE)
@@ -86,3 +86,10 @@ class InvoiceRepository(BaseRepository[Invoice]):
         for r in rows:
             report.buckets[r.bucket] = AgingBucket(r.bucket, int(r.n), int(r.balance))
         return report
+
+
+class InvoiceLineItemRepository(BaseRepository[InvoiceLineItem]):
+    model = InvoiceLineItem
+
+    async def for_invoice(self, invoice_id: uuid.UUID) -> list[InvoiceLineItem]:
+        return await self.list(invoice_id=invoice_id, order_by=(InvoiceLineItem.sort_order,), page_size=500)

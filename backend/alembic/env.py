@@ -108,6 +108,13 @@ def _include_object(obj, name, type_, reflected, compare_to) -> bool:
     # audit_logs partitions are created by migration 012, not by the ORM.
     if type_ == "table" and name and name.startswith("audit_logs_"):
         return False
+    # Expression indexes (migration 016: to_tsvector('simple', <number>::text))
+    # cannot be compared textually by autogenerate -- the reflected expression and
+    # the model's never match byte-for-byte -- so they would be reported as
+    # drop+create on every run. They are declared in the models for documentation
+    # and excluded from comparison here.
+    if type_ == "index" and name in ("ix_trips_number_search", "ix_quotes_number_search"):
+        return False
     return True
 
 

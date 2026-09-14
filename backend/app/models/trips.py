@@ -24,6 +24,7 @@ class Trip(BitluxBase, TenantScopedMixin, table=True):
     __table_args__ = (
         *tenant_indexes("trips"),
         Index("uq_trips_number", "client_id", "trip_number", unique=True, postgresql_where=text("deleted_at IS NULL")),
+        Index("ix_trips_number_search", text("to_tsvector('simple'::regconfig, (trip_number)::text)"), postgresql_using="gin"),  # migration 016
         Index("ix_trips_status_departure", "client_id", "status", "departure_date", postgresql_where=text("deleted_at IS NULL")),
         Index("ix_trips_account", "client_id", "account_holder_id", text("departure_date DESC")),
         Index("ix_trips_owner", "client_id", "owner_user_id", "status"),

@@ -24,6 +24,7 @@ class Manufacturer(BitluxBase, SharedCatalogMixin, table=True):
         *tenant_indexes("manufacturers"),
         Index("uq_manufacturers_client_name", "client_id", text("lower(name)"), unique=True, postgresql_nulls_not_distinct=True, postgresql_where=text("deleted_at IS NULL")),
         Index("ix_manufacturers_name", text("lower(name)")),
+        Index("ix_manufacturers_search", "search_tsv", postgresql_using="gin"),  # migration 016
         {"comment": "Aircraft manufacturers. DATA_MODEL.md 3.3."},
     )
 
@@ -35,6 +36,7 @@ class Manufacturer(BitluxBase, SharedCatalogMixin, table=True):
     logo_url: Optional[str] = Field(default=None, sa_column=Column("logo_url", Text))
     founded_year: Optional[int] = Field(default=None, sa_column=Column("founded_year", SmallInteger))
     is_active: bool = Field(default=True, sa_column=Column("is_active", Boolean, nullable=False, server_default=text("true")))
+    search_tsv: Optional[Any] = Field(default=None, sa_column=Column("search_tsv", TSVECTOR, Computed("to_tsvector('english'::regconfig, coalesce(name::text, '') || ' ' || coalesce(short_name::text, '') || ' ' || coalesce(code::text, ''))", persisted=True)))  # migration 016
 
     models: list["AircraftModel"] = Relationship(back_populates="manufacturer")
 
@@ -49,6 +51,7 @@ class AircraftModel(BitluxBase, SharedCatalogMixin, table=True):
         Index("ix_aircraft_models_icao", "icao_type_code"),
         Index("ix_aircraft_models_mfr", "manufacturer_id"),
         Index("ix_aircraft_models_cat_range", "category", "range_nm"),
+        Index("ix_aircraft_models_search", "search_tsv", postgresql_using="gin"),  # migration 016
         CheckConstraint("hourly_rate_low_cents IS NULL OR hourly_rate_high_cents IS NULL OR hourly_rate_high_cents >= hourly_rate_low_cents", name="ck_aircraft_models_rate_band"),
         {"comment": "Aircraft types. DATA_MODEL.md 3.3."},
     )
@@ -76,6 +79,7 @@ class AircraftModel(BitluxBase, SharedCatalogMixin, table=True):
     production_start_year: Optional[int] = Field(default=None, sa_column=Column("production_start_year", SmallInteger))
     production_end_year: Optional[int] = Field(default=None, sa_column=Column("production_end_year", SmallInteger))
     image_url: Optional[str] = Field(default=None, sa_column=Column("image_url", Text))
+    search_tsv: Optional[Any] = Field(default=None, sa_column=Column("search_tsv", TSVECTOR, Computed("to_tsvector('english'::regconfig, coalesce(name::text, '') || ' ' || coalesce(family::text, '') || ' ' || coalesce(icao_type_code::text, ''))", persisted=True)))  # migration 016
 
     manufacturer: Optional["Manufacturer"] = Relationship(back_populates="models")
     aircraft: list["Aircraft"] = Relationship(back_populates="model")

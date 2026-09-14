@@ -25,6 +25,8 @@ class AuditLog(BitluxBase, OptionalTenantColumnMixin, table=True):
         Index("ix_audit_logs_action", "client_id", "action", text("occurred_at DESC")),
         Index("ix_audit_logs_occurred_brin", "occurred_at", postgresql_using="brin"),
         Index("ix_audit_logs_after_gin", "after", postgresql_using="gin", postgresql_ops={"after": "jsonb_path_ops"}),
+        # Migration 012 sets this comment twice (create_table, then COMMENT ON); this is
+        # the second, final value, which is what autogenerate compares against.
         {"comment": "Append-only. The application role holds SELECT, INSERT only (migration 012, asserted in 015); UPDATE/DELETE are additionally blocked for every role, owner included, by trigger trg_audit_logs_immutable (migration 013).", "postgresql_partition_by": "RANGE (occurred_at)"},
     )
 

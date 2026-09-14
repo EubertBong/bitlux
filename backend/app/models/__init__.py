@@ -9,7 +9,7 @@ from sqlmodel import SQLModel
 from . import enums
 from .base import (BitluxBase, IdMixin, OptionalTenantColumnMixin, SharedCatalogMixin, TenantColumnMixin, TenantScopedMixin, TimestampMixin, AuthoredMixin, pg_enum, uuid7, utcnow)
 from .enums import *  # noqa: F401,F403
-from .tenancy import Client, User
+from .tenancy import Client, RefreshToken, User
 from .crm import Segment, Contact, ContactChannel, Address, Passenger, AccountHolder, AccountHolderPassenger, TravelDocument
 from .fleet import Manufacturer, AircraftModel, Operator, OperatorSafetyRating, Aircraft, AircraftOperatorAssignment
 from .geography import Airport, FBO
@@ -24,7 +24,7 @@ __all__ = [
     "SQLModel", "enums", "BitluxBase", "IdMixin", "OptionalTenantColumnMixin", "SharedCatalogMixin", "TenantColumnMixin",
     "TenantScopedMixin", "TimestampMixin", "AuthoredMixin", "pg_enum", "uuid7", "utcnow",
     *enums.__all__,
-    "Client", "User",
+    "Client", "User", "RefreshToken",
     "Segment", "Contact", "ContactChannel", "Address", "Passenger", "AccountHolder", "AccountHolderPassenger", "TravelDocument",
     "Manufacturer", "AircraftModel", "Operator", "OperatorSafetyRating", "Aircraft", "AircraftOperatorAssignment",
     "Airport", "FBO",
@@ -39,6 +39,7 @@ __all__ = [
 TABLE_MODELS: dict[str, type[SQLModel]] = {
     "clients": Client,
     "users": User,
+    "refresh_tokens": RefreshToken,
     "segments": Segment,
     "contacts": Contact,
     "contact_channels": ContactChannel,

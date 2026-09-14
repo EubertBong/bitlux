@@ -267,3 +267,102 @@ then `COMMENT ON`), and the model had the first.
    check now runs in a throwaway session on the same connection.
 3. My own arithmetic: BLX-2026-002's margin is 442,000, also under the 600,000
    threshold I had asserted would match only one trip.
+
+---
+
+## 2026-09-14 — Sprint 3: FastAPI endpoints, RBAC, search, relationship graph
+
+**Prompt (abridged):** App skeleton (`main`, `config`, `deps`, `api/v1/*`), Pydantic
+schemas per resource, argon2 + JWT auth with rotation, a role→permission map,
+`/search` on the tsvector indexes (no ILIKE), `/graph/{entity}/{id}` for D3 with a
+200-node cap, one error shape with request-id logging, 13 httpx tests, docs. No
+frontend. Also: note the duplicate 012 comment in the model; don't touch shipped
+migrations.
+
+**What was already there.** The working tree held ~7,700 uncommitted lines of this
+sprint — the whole layout above, migration 016, schemas, 14 API tests — from a
+session that stopped mid-router (`api/v1/invoices.py` imported a repository that
+had never been written; the API had never imported, the tests had never run).
+The choice was to review and finish it or to rewrite it. It was reviewed file by
+file, its design held up, and it was finished. Not reading it and not rewriting
+it were both wrong answers.
+
+**Design points that survived review and are worth knowing:**
+
+- **`auth_lookup_user()` is the one deliberate hole in tenant isolation.** Login
+  must find a user by email before a tenant is known, which RLS forbids the app
+  role. Migration 016 adds a `SECURITY DEFINER` function with `row_security = off`
+  that does that lookup and nothing else; it is the only thing `bitlux_app` can
+  execute across tenants. Everything after login is a normal tenant transaction.
+- Refresh tokens are stateful (SHA-256 in `refresh_tokens`), rotated on every use;
+  a replayed token revokes the user's whole family. Access tokens are 15-minute
+  stateless JWTs, but every request re-reads the user row under RLS, so role
+  changes and deactivation are immediate. The row's role, not the token's, decides.
+- `_crud.install_crud()` builds the six standard operations once per resource
+  from a `ResourceSpec`; domain routes are registered *before* it so literal
+  paths like `/invoices/ar-aging` beat `/{item_id}`. Every mutation appends a
+  redacted audit event; `[enc]` inputs are encrypted there and never travel further.
+- `/search` OR-s `websearch_to_tsquery` with a prefix term on the last word so
+  "gulf" finds Gulfstream. Trip/quote numbers got expression GIN indexes in 016 so
+  number search is an index scan like every other type. Types the caller cannot
+  view are dropped before the query runs.
+- `/graph` skips node types the caller may not view and 404s an invisible root —
+  the same "absent, not forbidden" rule as the rest of the API.
+
+**What was wrong, in the order it was found:**
+
+1. `InvoiceLineItemRepository` did not exist — where the previous session stopped.
+2. `POST /auth/login` returned 422 for every demo user: pydantic's `EmailStr`
+   (email-validator) rejects the reserved `.test` TLD. Replaced with a tolerant
+   `EmailAddress` type (trim, lower-case, obvious shape); deliverability is not
+   this layer's concern, and demo/staging tenants live on `.test`/`.local`.
+3. `cand.role.value` blew up: `auth_lookup_user()` is raw SQL and asyncpg returns
+   PostgreSQL enums as plain strings. `LoginCandidate` now coerces its three enum
+   columns once, at the boundary.
+4. Admin users were mounted at `/admin/admin/...` — `users_router` repeated the
+   prefix. Found by listing the OpenAPI paths, not by a test. Now `/admin/users`.
+5. Mine, this session: a `cat > README.md` ran after the shell's working directory
+   had silently reverted to the repo root, overwriting the root README with the
+   backend one. Git had it; restored, and every path in this sprint is absolute now.
+
+**The finding: RLS was blocking the GIN indexes, and my first EXPLAIN write-up was
+wrong.** The first `EXPLAIN` pass showed sequential scans on the tiny demo tables and
+I wrote that this was table size and that `enable_seqscan = off` produced the GIN
+plan. It did not: with seq scans disabled the planner walked btree indexes on
+`client_id` instead — never `ix_contacts_search`. A 50k-row synthetic load
+(inside a rolled-back transaction) still seq-scanned, and a first attempt at that
+experiment was itself invalid because `ANALYZE` issued by `bitlux_app` is
+silently skipped (non-owner), leaving the planner believing `client_id = …`
+matched one row. Done properly — load and `ANALYZE` as the owner, plan taken after
+`SET LOCAL ROLE bitlux_app` — the result was unambiguous and reproducible:
+
+| who runs `WHERE search_tsv @@ query` | plan at 50,008 rows |
+|---|---|
+| owner (RLS bypassed) | Bitmap Index Scan on `ix_contacts_search`, 0.036 ms |
+| `bitlux_app` (RLS enforced) | Seq Scan, ~15 ms |
+| `bitlux_app` after `ALTER FUNCTION ts_match_vq LEAKPROOF` (experiment, rolled back) | Bitmap Index Scan on `ix_contacts_search`, 0.036 ms |
+
+Mechanism: policy quals are security barriers and a non-`LEAKPROOF` operator cannot
+be an index condition beneath one. `@@` is not leakproof (neither are `ILIKE`/`~~`).
+So as shipped, `/search` could never use the indexes for the app role — the query
+shape and the indexes were right, RLS stood between them. Fix: migration 017,
+`search_ids(type, tsquery, limit)`, a `SECURITY DEFINER` function with
+`row_security = off`, tenant-scoped by `current_client_id()` (the same trust root
+RLS uses; unset ⇒ nothing), static SQL per whitelisted type, returning `(id,
+rank)`; the repository joins those ids from a statement still under RLS. Tests
+cover scoping, fail-closed, unknown type, and GIN eligibility of the inner
+statement. The general rule is now in `DATA_MODEL.md` §1.7: any predicate that
+must be indexed for the app role and uses a non-leakproof operator needs this
+treatment, because a plain `WHERE` will seq-scan without a single error message.
+
+**Verified:** 33 tests pass (19 repository + 14 API, all as `bitlux_app` in
+rolled-back transactions); `alembic check` clean through 017; 117 paths / 190
+operations in OpenAPI; live curl of login, `/search?q=gulf`, and
+`/graph/client/<demo>?depth=2` (81 nodes, 117 edges, every node/edge in the D3
+shape, every edge endpoint a node); the `EXPLAIN` table above.
+
+**Also:** migration 016 is now described in `DATA_MODEL.md` (`refresh_tokens`, the
+credential columns, `auth_lookup_user`, the new search indexes) — the previous
+session had not done that, and the document's own rule is schema and doc in the
+same commit. `backend/README.md` added. The API suite takes ~45 s because argon2id
+at library defaults runs on every login fixture — acceptable, noted.

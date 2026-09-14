@@ -23,6 +23,7 @@ class Quote(BitluxBase, TenantScopedMixin, table=True):
     __table_args__ = (
         *tenant_indexes("quotes"),
         Index("uq_quotes_number_revision", "client_id", "quote_number", "revision", unique=True, postgresql_where=text("deleted_at IS NULL")),
+        Index("ix_quotes_number_search", text("to_tsvector('simple'::regconfig, (quote_number)::text)"), postgresql_using="gin"),  # migration 016
         Index("uq_quotes_current", "client_id", "quote_number", unique=True, postgresql_where=text("is_current AND deleted_at IS NULL")),
         Index("uq_quotes_accepted_per_trip", "trip_id", unique=True, postgresql_where=text("status = 'accepted' AND deleted_at IS NULL")),
         Index("ix_quotes_status_valid", "client_id", "status", "valid_until", postgresql_where=text("deleted_at IS NULL")),

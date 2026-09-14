@@ -127,8 +127,24 @@ is_local => true)`, the parameterisable `SET LOCAL`) and binds the Python
 context; nesting it for another tenant restores the outer one on exit.
 
 ```bash
-make test        # 16 tests, each in a rolled-back transaction, as bitlux_app
+make test        # 30 tests (repositories + API), each in a rolled-back transaction, as bitlux_app
 ```
+
+## API
+
+```bash
+make api                                  # http://127.0.0.1:8000/api/v1/docs
+curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' -d '{"email":"broker@demo.test","password":"Demo!2026"}'
+```
+
+FastAPI over the repository layer: JWT auth (argon2id passwords, 15-min access /
+7-day rotating refresh tokens), role-based permissions, the standard six
+operations on every resource, `GET /search` on the tsvector GIN indexes, and
+`GET /graph/{entity}/{id}` for the D3 relationship view. Every request runs as
+`bitlux_app` inside a tenant transaction, so RLS is live from the first query;
+another tenant's row is a 404. Details, env vars, endpoint list and the auth flow
+are in **[backend/README.md](backend/README.md)**.
 
 ## Operational Runbook
 

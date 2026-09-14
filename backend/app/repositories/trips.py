@@ -9,12 +9,12 @@ from typing import Optional
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import selectinload
 
-from app.models import Leg, Trip
+from app.models import Leg, LegCrew, LegPassenger, Trip
 from app.models.enums import LegStatus, TripStatus
 
 from .base import BaseRepository
 
-__all__ = ["TripRepository", "LegRepository"]
+__all__ = ["TripRepository", "LegRepository", "LegPassengerRepository", "LegCrewRepository"]
 
 
 class TripRepository(BaseRepository[Trip]):
@@ -73,3 +73,11 @@ class LegRepository(BaseRepository[Leg]):
             order_by=(Leg.scheduled_departure_at,),
             **page,
         )
+
+
+class LegPassengerRepository(BaseRepository[LegPassenger]):
+    model = LegPassenger
+
+
+class LegCrewRepository(BaseRepository[LegCrew]):
+    model = LegCrew
