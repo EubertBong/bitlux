@@ -24,7 +24,15 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-from migration_helpers import TS, UUID, money, pgenum, std_cols, std_indexes
+from migration_helpers import (
+    grant_app_dml,
+    money,
+    pgenum,
+    std_cols,
+    std_indexes,
+    TS,
+    UUID,
+)
 
 revision: str = "009"
 down_revision: Union[str, None] = "008"
@@ -151,6 +159,11 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
+
+    # --- application role: full DML on these ordinary tenant tables -------------
+    # Explicit per table so every UPDATE/DELETE grant is a greppable line
+    # (DATA_MODEL 1.7). audit_logs in 012 pointedly does not get this.
+    grant_app_dml("empty_legs")
 
 
 def downgrade() -> None:

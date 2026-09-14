@@ -30,7 +30,17 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-from migration_helpers import CITEXT, JSONB, TS, UUID, money, pgenum, std_cols, std_indexes
+from migration_helpers import (
+    CITEXT,
+    grant_app_dml,
+    JSONB,
+    money,
+    pgenum,
+    std_cols,
+    std_indexes,
+    TS,
+    UUID,
+)
 
 revision: str = "008"
 down_revision: Union[str, None] = "007"
@@ -352,6 +362,11 @@ def upgrade() -> None:
         postgresql_where=sa.text("deleted_at IS NULL"),
     )
     op.create_index("ix_leg_crew_leg", "leg_crew", ["client_id", "leg_id"])
+
+    # --- application role: full DML on these ordinary tenant tables -------------
+    # Explicit per table so every UPDATE/DELETE grant is a greppable line
+    # (DATA_MODEL 1.7). audit_logs in 012 pointedly does not get this.
+    grant_app_dml("trips", "legs", "leg_passengers", "leg_crew")
 
 
 def downgrade() -> None:

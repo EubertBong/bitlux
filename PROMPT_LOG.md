@@ -118,3 +118,82 @@ Alembic genuinely cannot express (extensions, enums, `UNIQUE NULLS NOT
 DISTINCT`, the `point` generated column, `EXCLUDE`, partitioning, triggers, RLS).
 Keeping columns in `op.create_table()` means SQLAlchemy still knows the types,
 which matters for the autogenerate support `env.py` is being wired up for.
+
+---
+
+## 2026-09-14 — Append-only enforcement, partition maintenance, demo seed
+
+**Prompt (abridged):** (1) Fold the `audit_logs` REVOKE into migration 012 and make
+"append-only" the default grant, with explicit `UPDATE, DELETE` per table; add an
+invariant check in 015. (2) `partition_maintenance.py` + `make partition-maintenance`
++ an Operational Runbook. (3) `seed.py`: one deterministic, idempotent demo tenant
+(uuid5 ids) written under the app's RLS context. (4) `verify_seed.py` with six
+PASS/FAIL checks. (5) Docs and commit.
+
+**Correction to the prompt's premise, and what it changed.** The
+`ALTER DEFAULT PRIVILEGES` was never in migration 001 — it lived in
+`docker/initdb/10-app-role.sql`, and so did the *creation* of `bitlux_app`. That
+means a `REVOKE … FROM bitlux_app` in 012 would fail on any database where initdb
+didn't run (Neon, CI). So the full option was taken rather than the minimal one:
+
+- Migration 001 bootstraps `bitlux_app` (`NOLOGIN NOBYPASSRLS`) if absent.
+- Every table-creating migration grants the role its DML explicitly via
+  `grant_app_dml()` — 36 tables get `SELECT, INSERT, UPDATE, DELETE`; `audit_logs`
+  (012) gets `SELECT, INSERT` and has `UPDATE, DELETE` revoked from the role and
+  from `PUBLIC` before the first partition exists.
+- 015 ends the chain by asserting, with `has_table_privilege()` (which also sees
+  grants arriving via `PUBLIC` or role membership — exactly how an accident would
+  arrive), that the role still has neither. Tested: granting `UPDATE` inside a
+  transaction makes the block raise.
+- initdb's default privileges dropped to `SELECT, INSERT` — a floor for anything
+  created outside the chain, never a source of write access.
+- `post_migrate_grants.sql` deleted; nothing manual remains.
+
+**Two facts about partitions, verified empirically, that shaped the design:**
+
+1. PostgreSQL checks privileges on the table *named in the query*. Inserting through
+   `audit_logs` succeeded as `bitlux_app` into a partition that had `REVOKE ALL` —
+   so the maintenance job never needs to grant.
+2. The corollary is a hole: a partition has no RLS policy of its own, so any
+   *direct* grant on one (which local `ALTER DEFAULT PRIVILEGES` was creating) is a
+   cross-tenant read. 012 and the maintenance job now `REVOKE ALL` on every
+   partition from the app role. Access to `audit_logs` is via the parent only.
+
+**Partition job.** Ensures the current month + 12 ahead, skips existing, revokes
+direct access on new ones, confirms `audit_logs_immutable` was inherited, and
+exits 1 if `audit_logs_default` holds rows (2 if a create failed). First run:
+created `2027_09`, 12 already present, default empty. Runbook in README, including
+the hard date: without the job on a schedule, 2027-09-01 is when audit rows start
+landing in the default partition.
+
+**Seed.** 237 rows across 33 tenant tables (plus Heathrow and the Citation X+
+added to the *global* catalog, since duplicating Gulfstream into the tenant would
+have been wrong). Phase A resolves the reference catalog by natural key as the
+owner; phase B writes the tenant through `SET LOCAL ROLE bitlux_app` + tenant
+`set_config`, and refuses to run if the effective role would bypass RLS. Two runs
+produce identical counts. Dates are relative to today (overdue tasks, a passport
+expiring in 60 days) while ids stay fixed, so re-running refreshes in place.
+
+**Bugs on the way, all caught by the scripts' own checks:** the first `users` row
+cited `created_by = broker` before broker existed (self-referential table — the
+bootstrap rows are now authored by nobody, which is also the truth); the deposit
+invoice line had a different shape from the balance lines (the upsert now takes the
+union of keys); the count loops asked `clients` for a `client_id` it doesn't have
+(the tenant root keys on `id`); and — found only by re-running verify after a
+rebuild — `audit_logs` doubled on every run, because immutable rows keyed
+`(id, occurred_at)` were being given a `NOW`-relative `occurred_at`, so each run
+inserted a *new* row under the same id. Immutable rows need timestamps as fixed
+as their ids; they are now anchored inside 2026-09, the partition 012 always
+creates. The lesson generalises: idempotency on an append-only table is a
+property of the key, not of `ON CONFLICT`.
+
+**Round-trip.** `downgrade base` correctly *refuses* over seeded data — 015's
+downgrade deletes global airports that demo legs reference, and RESTRICT stops
+it rather than cascading. On a clean database: 15 up, 15 down, no residue.
+
+**Verification (`make verify-seed`, run as `bitlux_app` under RLS):** counts match
+`expected_counts()` (computed from the same builder, never hand-maintained); the
+BLX-2026-001 manifest is Priya Raman + Rafael Mendes; N650BX carries the insurance
+and AOC certificates; two passports expire within 180 days; zero lapsed ratings;
+zero overlapping legs on N650BX; and a seventh check confirms another tenant id
+sees nothing. All PASS.

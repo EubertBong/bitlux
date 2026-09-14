@@ -17,6 +17,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql as pg
 
 __all__ = [
+    "APP_ROLE",
+    "grant_app_dml",
     "UUID",
     "LTREE",
     "TS",
@@ -37,6 +39,24 @@ __all__ = [
 UUID = pg.UUID(as_uuid=True)
 JSONB = pg.JSONB
 CITEXT = pg.CITEXT
+
+# The role the application connects as (DATA_MODEL 1.7). Bootstrapped NOLOGIN in
+# migration 001 if it does not already exist; local dev creates it LOGIN earlier
+# via docker/initdb. Privileges are granted table-by-table in the migration that
+# creates each table, so a table has no DML for the app until a migration says so
+# -- "append-only" (SELECT, INSERT) is the ceiling until then.
+APP_ROLE = "bitlux_app"
+
+
+def grant_app_dml(*tables: str) -> None:
+    """Grant full DML on ordinary tenant tables to the application role.
+
+    Deliberately NOT called for audit_logs (migration 012), which gets
+    SELECT, INSERT only. Every UPDATE/DELETE grant in the schema is therefore
+    an explicit, greppable line in a migration.
+    """
+    for table in tables:
+        op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {APP_ROLE}")
 
 
 class LTREE(sa.types.UserDefinedType):

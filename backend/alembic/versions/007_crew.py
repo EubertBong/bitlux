@@ -24,7 +24,16 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql as pg
 
-from migration_helpers import CITEXT, JSONB, UUID, pgenum, std_cols, std_indexes, tsv
+from migration_helpers import (
+    CITEXT,
+    grant_app_dml,
+    JSONB,
+    pgenum,
+    std_cols,
+    std_indexes,
+    tsv,
+    UUID,
+)
 
 revision: str = "007"
 down_revision: Union[str, None] = "006"
@@ -132,6 +141,11 @@ def upgrade() -> None:
         ["id"],
         ondelete="CASCADE",
     )
+
+    # --- application role: full DML on these ordinary tenant tables -------------
+    # Explicit per table so every UPDATE/DELETE grant is a greppable line
+    # (DATA_MODEL 1.7). audit_logs in 012 pointedly does not get this.
+    grant_app_dml("crew_members")
 
 
 def downgrade() -> None:

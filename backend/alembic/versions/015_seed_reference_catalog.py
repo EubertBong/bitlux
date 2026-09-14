@@ -24,6 +24,8 @@ from typing import Sequence, Union
 
 from alembic import op
 
+from migration_helpers import APP_ROLE
+
 revision: str = "015"
 down_revision: Union[str, None] = "014"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -242,8 +244,7 @@ def upgrade() -> None:
     )
 
     # ---------------------------------------------------------------------- fbos
-    op.execute(
-        """
+    _fbos_insert = """
         INSERT INTO fbos
             (id, client_id, airport_id, name, brand, has_customs, is_preferred)
         VALUES
@@ -263,6 +264,25 @@ def upgrade() -> None:
             ('01a0a008-12f4-73f1-b5af-91a143065d9c', NULL, '01a0a008-12f4-73f1-b5af-9026f83d67f2', 'Universal Aviation Paris', 'Universal', true, false),
             ('01a0a008-12f4-73f1-b5af-91b07d8b7bdb', NULL, '01a0a008-12f4-73f1-b5af-90394ce3116c', 'Jet Aviation Geneva', 'Jet Aviation', true, false),
             ('01a0a008-12f4-73f1-b5af-91c7fa60e96a', NULL, '01a0a008-12f4-73f1-b5af-8f77c2c7b368', 'Atlantic Aviation ASE', 'Atlantic', false, false)
+        """
+    op.execute(_fbos_insert)
+
+    # --- Invariant: audit_logs is append-only for the application role ---------
+    # This is the last migration in the chain, so it is the right place to assert
+    # what 012 established still holds. has_table_privilege() is used rather than
+    # information_schema.role_table_grants because it also sees privileges that
+    # arrive indirectly -- via PUBLIC or via membership in another role -- which is
+    # exactly how an accidental grant would sneak in.
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF has_table_privilege('{APP_ROLE}', 'audit_logs', 'UPDATE')
+               OR has_table_privilege('{APP_ROLE}', 'audit_logs', 'DELETE') THEN
+                RAISE EXCEPTION
+                    'audit_logs must be append-only but {APP_ROLE} has UPDATE or DELETE';
+            END IF;
+        END $$;
         """
     )
 

@@ -8,7 +8,9 @@
 -- bitlux      -> owns the schema, runs migrations. Superuser. RLS does not apply.
 -- bitlux_app  -> owns nothing, no BYPASSRLS. RLS applies. This is the runtime role.
 --
--- Production must make the same split. See DATA_MODEL.md 1.7.
+-- Migration 001 would create bitlux_app NOLOGIN if it did not exist; creating it
+-- here first, with LOGIN and a dev password, is what lets `psql -U bitlux_app`
+-- work locally. Production makes the same split. See DATA_MODEL.md 1.7.
 --
 -- Runs once, on first initialisation of the data volume.
 
@@ -24,10 +26,12 @@ CREATE ROLE bitlux_app
 GRANT CONNECT ON DATABASE bitlux_crm TO bitlux_app;
 GRANT USAGE ON SCHEMA public TO bitlux_app;
 
--- Grant DML on every table bitlux creates from now on, so each new migration
--- does not have to remember to grant. Applies to tables created *after* this
--- statement, which is every table in migrations 003-015.
+-- Safety-net default for anything bitlux creates outside the migration chain
+-- (an ad-hoc table in a psql session, say): READ + APPEND only. UPDATE/DELETE
+-- are never a default -- each migration grants them explicitly, per table, via
+-- grant_app_dml(), so "append-only" is the floor and every exception is a
+-- greppable line. audit_logs never receives one.
 ALTER DEFAULT PRIVILEGES FOR ROLE bitlux IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO bitlux_app;
+    GRANT SELECT, INSERT ON TABLES TO bitlux_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE bitlux IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO bitlux_app;

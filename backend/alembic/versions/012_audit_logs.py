@@ -6,8 +6,10 @@ Append-only and machine-written. It answers "who changed this field", which is
 why it has no ``deleted_at``, no ``updated_at`` and no ``updated_by`` -- an audit
 row that can be edited is not an audit row. UPDATE/DELETE are blocked two ways:
 
-  * grants  -- revoked from PUBLIC here; production additionally revokes them
-               from the application role (DATA_MODEL 1.7).
+  * grants  -- the application role is granted SELECT, INSERT only, and
+               UPDATE/DELETE are revoked from it and from PUBLIC, here, before
+               the first partition exists. Migration 015 asserts this at the
+               end of the chain so a later grant cannot silently undo it.
   * trigger -- migration 013 adds an immutability trigger that fires even for
                the table owner, so the guarantee also holds in local dev where
                the app connects as owner.
@@ -42,7 +44,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql as pg
 
-from migration_helpers import JSONB, TS, UUID, pgenum
+from migration_helpers import APP_ROLE, JSONB, TS, UUID, pgenum
 
 revision: str = "012"
 down_revision: Union[str, None] = "011"
@@ -125,6 +127,15 @@ def upgrade() -> None:
         comment="Append-only audit trail, monthly partitions. DATA_MODEL.md 3.9.",
     )
 
+    # --- Append-only privileges, set before any partition exists -----------------
+    # The application role gets SELECT + INSERT and nothing else. The REVOKEs are
+    # belt-and-braces (nothing has granted UPDATE/DELETE here), but they make the
+    # intent explicit and undo any ALTER DEFAULT PRIVILEGES a deployment may have.
+    # Migration 015 asserts this still holds at the end of the chain.
+    op.execute(f"GRANT SELECT, INSERT ON audit_logs TO {APP_ROLE}")
+    op.execute(f"REVOKE UPDATE, DELETE ON audit_logs FROM {APP_ROLE}")
+    op.execute("REVOKE UPDATE, DELETE ON audit_logs FROM PUBLIC")
+
     # --- Monthly partitions + a default catch-all --------------------------------
     for lo, hi in PARTITIONS:
         name = f"audit_logs_{lo:%Y_%m}"
@@ -133,6 +144,17 @@ def upgrade() -> None:
             f"FOR VALUES FROM ('{lo:%Y-%m-%d}') TO ('{hi:%Y-%m-%d}')"
         )
     op.execute("CREATE TABLE audit_logs_default PARTITION OF audit_logs DEFAULT")
+
+    # Partitions are reachable only through the parent. PostgreSQL checks
+    # privileges on the table named in the query, so the parent's SELECT/INSERT
+    # grant is sufficient for every partition -- and a partition has no RLS
+    # policy of its own, so any *direct* grant on one would be a cross-tenant
+    # read. Revoke anything a deployment's ALTER DEFAULT PRIVILEGES may have
+    # handed out. scripts/partition_maintenance.py does the same for partitions
+    # it creates later.
+    for lo, _hi in PARTITIONS:
+        op.execute(f"REVOKE ALL ON audit_logs_{lo:%Y_%m} FROM {APP_ROLE}")
+    op.execute(f"REVOKE ALL ON audit_logs_default FROM {APP_ROLE}")
 
     # --- Indexes (created on the parent, propagated to every partition) ----------
     # "the history of this record"
@@ -160,14 +182,11 @@ def upgrade() -> None:
         "CREATE INDEX ix_audit_logs_after_gin ON audit_logs USING GIN (after jsonb_path_ops)"
     )
 
-    # --- Append-only grants ------------------------------------------------------
-    # The trigger in migration 013 is the real enforcement (it binds the owner
-    # too); this closes the door for any role that inherits from PUBLIC.
-    op.execute("REVOKE UPDATE, DELETE, TRUNCATE ON audit_logs FROM PUBLIC")
     op.execute(
         "COMMENT ON TABLE audit_logs IS "
-        "'Append-only. UPDATE/DELETE blocked by trigger trg_audit_logs_immutable. "
-        "Production must additionally REVOKE UPDATE, DELETE FROM the application role.'"
+        "'Append-only. The application role holds SELECT, INSERT only (migration 012, "
+        "asserted in 015); UPDATE/DELETE are additionally blocked for every role, "
+        "owner included, by trigger trg_audit_logs_immutable (migration 013).'"
     )
 
 

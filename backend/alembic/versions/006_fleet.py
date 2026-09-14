@@ -26,14 +26,15 @@ from sqlalchemy.dialects import postgresql as pg
 
 from migration_helpers import (
     CITEXT,
+    grant_app_dml,
     JSONB,
-    TS,
-    UUID,
     money,
     pgenum,
     std_cols,
     std_indexes,
+    TS,
     tsv,
+    UUID,
 )
 
 revision: str = "006"
@@ -341,6 +342,16 @@ def upgrade() -> None:
         ["client_id", "aircraft_id", sa.text("effective_from DESC")],
     )
     op.create_index("ix_aoa_operator", "aircraft_operator_assignments", ["client_id", "operator_id"])
+
+    # --- application role: full DML on these ordinary tenant tables -------------
+    # Explicit per table so every UPDATE/DELETE grant is a greppable line
+    # (DATA_MODEL 1.7). audit_logs in 012 pointedly does not get this.
+    grant_app_dml(
+        "operators",
+        "operator_safety_ratings",
+        "aircraft",
+        "aircraft_operator_assignments",
+    )
 
 
 def downgrade() -> None:

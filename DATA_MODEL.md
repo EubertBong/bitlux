@@ -201,13 +201,34 @@ matter what the policies say. Enabling and forcing RLS is necessary but not
 sufficient — isolation is only real when the querying role is neither a
 superuser nor the owner.
 
-The local stack therefore provisions a second role, `bitlux_app`
-(`NOSUPERUSER NOBYPASSRLS`, owns nothing), in `docker/initdb/10-app-role.sql`.
-`bitlux` owns the schema and runs migrations; `bitlux_app` is what the
-application connects as and what RLS actually constrains. The same split is
-mandatory in production. `ALTER DEFAULT PRIVILEGES` in that init script grants
-`bitlux_app` DML on every table `bitlux` subsequently creates, so new migrations
-do not need to remember to grant.
+The schema therefore has a second role, `bitlux_app` (`NOSUPERUSER NOBYPASSRLS`,
+owns nothing). `bitlux` owns the schema and runs migrations; `bitlux_app` is what
+the application connects as and what RLS actually constrains. The same split is
+mandatory in production.
+
+**Where privileges come from — migrations, not defaults.** Migration 001 creates
+`bitlux_app` (`NOLOGIN`) if it does not exist, and every migration that creates a
+table grants that role exactly what the table needs, via `grant_app_dml()`:
+`SELECT, INSERT, UPDATE, DELETE` on ordinary tenant tables, and **`SELECT, INSERT`
+only on `audit_logs`** (migration 012, which also revokes `UPDATE, DELETE` from the
+role and from `PUBLIC` before the first partition exists). Migration 015 — the
+end of the chain — asserts with `has_table_privilege()` that `bitlux_app` still
+has neither `UPDATE` nor `DELETE` on `audit_logs`, so a later grant cannot undo
+it silently. Every write privilege in the schema is therefore an explicit,
+greppable line in a migration, and dev and prod get identical privileges from
+the same source.
+
+`docker/initdb/10-app-role.sql` (local only) creates the same role earlier with
+`LOGIN` and a dev password, and sets `ALTER DEFAULT PRIVILEGES` to `SELECT,
+INSERT` as a safety net for anything created outside the migration chain —
+read-plus-append is the floor; `UPDATE`/`DELETE` are never a default.
+
+**Partitions are reachable only through the parent.** PostgreSQL checks
+privileges on the table named in the query, so the parent's grant covers every
+`audit_logs_YYYY_MM`, and a partition has no RLS policy of its own — a direct
+grant on one would be a cross-tenant read. Migration 012 and
+`scripts/partition_maintenance.py` both `REVOKE ALL` on each partition from the
+app role.
 
 The session variable used by every policy is `app.client_id`, read through a
 helper so an unset or empty value fails closed rather than raising:
@@ -236,9 +257,9 @@ With `app.client_id` unset this returns `NULL`, every policy predicate evaluates
    ```
    With PgBouncer in transaction pooling mode this is correct; a plain `SET` would
    be a cross-tenant data leak.
-3. `audit_logs` additionally has UPDATE/DELETE revoked
-   (`backend/scripts/post_migrate_grants.sql`), and an append-only trigger
-   (migration 013) that blocks them even for the owner.
+3. `audit_logs` is append-only for the app role at the privilege layer
+   (migration 012, asserted by 015) and, for every role including the owner, by
+   the trigger in migration 013.
 
 **Verifying isolation.** Migration 014 applies `FORCE ROW LEVEL SECURITY` to every
 tenant table so that the non-superuser owner is bound too, but the only honest
@@ -1306,7 +1327,11 @@ audit_logs                               (APPEND-ONLY — no soft delete, no upd
   user_agent            text
 
   PARTITION BY RANGE (occurred_at), monthly; partitions detached to cold storage after 24 months
-  Grants: INSERT + SELECT only. UPDATE/DELETE revoked from the application role.
+  Provisioning: migration 012 creates 2026-09 .. 2027-08 + DEFAULT; scripts/partition_maintenance.py
+  (make partition-maintenance, run monthly) keeps >= 12 months of runway and alerts (exit 1) if the
+  DEFAULT partition ever holds rows. Partitions have no direct grants: access is via the parent only.
+  Grants: app role has SELECT + INSERT only (migration 012), asserted at the end of the chain (015);
+  UPDATE/DELETE blocked for every role by trigger (013).
   IDX  (client_id, entity_type, entity_id, occurred_at DESC)   -- "history of this record"
   IDX  (client_id, actor_user_id, occurred_at DESC)            -- "what did this user do"
   IDX  (client_id, action, occurred_at DESC)

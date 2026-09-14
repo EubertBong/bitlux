@@ -29,7 +29,16 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-from migration_helpers import CITEXT, TS, UUID, money, pgenum, std_cols, std_indexes
+from migration_helpers import (
+    CITEXT,
+    grant_app_dml,
+    money,
+    pgenum,
+    std_cols,
+    std_indexes,
+    TS,
+    UUID,
+)
 
 revision: str = "010"
 down_revision: Union[str, None] = "009"
@@ -525,6 +534,18 @@ def upgrade() -> None:
         ondelete="SET NULL",
         deferrable=True,
         initially="DEFERRED",
+    )
+
+    # --- application role: full DML on these ordinary tenant tables -------------
+    # Explicit per table so every UPDATE/DELETE grant is a greppable line
+    # (DATA_MODEL 1.7). audit_logs in 012 pointedly does not get this.
+    grant_app_dml(
+        "quotes",
+        "quote_line_items",
+        "bookings",
+        "invoices",
+        "invoice_line_items",
+        "payments",
     )
 
 

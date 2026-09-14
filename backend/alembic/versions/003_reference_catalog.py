@@ -35,7 +35,17 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-from migration_helpers import CITEXT, JSONB, UUID, money, pgenum, std_cols, std_indexes, tsv
+from migration_helpers import (
+    CITEXT,
+    grant_app_dml,
+    JSONB,
+    money,
+    pgenum,
+    std_cols,
+    std_indexes,
+    tsv,
+    UUID,
+)
 
 revision: str = "003"
 down_revision: Union[str, None] = "002"
@@ -228,6 +238,11 @@ def upgrade() -> None:
         ["client_id"],
         postgresql_where=sa.text("is_preferred AND deleted_at IS NULL"),
     )
+
+    # --- application role: full DML on these ordinary tenant tables -------------
+    # Explicit per table so every UPDATE/DELETE grant is a greppable line
+    # (DATA_MODEL 1.7). audit_logs in 012 pointedly does not get this.
+    grant_app_dml("manufacturers", "aircraft_models", "airports", "fbos")
 
 
 def downgrade() -> None:

@@ -23,14 +23,15 @@ import sqlalchemy as sa
 from alembic import op
 
 from migration_helpers import (
-    CITEXT,
-    JSONB,
-    TS,
     audit_cols,
+    CITEXT,
+    grant_app_dml,
     id_col,
+    JSONB,
     pgenum,
     std_cols,
     std_indexes,
+    TS,
 )
 
 revision: str = "004"
@@ -142,6 +143,11 @@ def upgrade() -> None:
         op.create_foreign_key(
             f"fk_{table}_updated_by", table, "users", ["updated_by"], ["id"], ondelete="SET NULL"
         )
+
+    # --- application role: full DML on these ordinary tenant tables -------------
+    # Explicit per table so every UPDATE/DELETE grant is a greppable line
+    # (DATA_MODEL 1.7). audit_logs in 012 pointedly does not get this.
+    grant_app_dml("clients", "users")
 
 
 def downgrade() -> None:

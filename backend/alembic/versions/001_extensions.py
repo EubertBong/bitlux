@@ -1,7 +1,15 @@
-"""001 - PostgreSQL extensions
+"""001 - PostgreSQL extensions and the application role
 
-Everything this schema needs that is not in core PostgreSQL 16.
-See DATA_MODEL.md 1.4 for the full feature/version matrix.
+Everything this schema needs that is not in core PostgreSQL 16 (see
+DATA_MODEL.md 1.4 for the feature/version matrix), plus the ``bitlux_app`` role
+that later migrations grant table privileges to.
+
+The role is created NOLOGIN NOBYPASSRLS if it does not already exist. In local
+dev ``docker/initdb/10-app-role.sql`` has already created it (LOGIN, with a
+password) before any migration runs, so this is a no-op there. In production
+this is what makes ``GRANT ... TO bitlux_app`` in migrations 003-012 valid on a
+fresh database; the operator then either gives it LOGIN or, better, creates a
+separate login role that is a member of it. See DATA_MODEL.md 1.7.
 
 Revision ID: 001
 Revises:
@@ -13,6 +21,8 @@ from __future__ import annotations
 from typing import Sequence, Union
 
 from alembic import op
+
+from migration_helpers import APP_ROLE
 
 revision: str = "001"
 down_revision: Union[str, None] = None
@@ -56,8 +66,28 @@ def upgrade() -> None:
     for name, _why in EXTENSIONS:
         op.execute(f'CREATE EXTENSION IF NOT EXISTS "{name}"')
 
+    # --- application role bootstrap (DATA_MODEL 1.7) ------------------------
+    # Roles are cluster-wide, so CREATE ROLE has no IF NOT EXISTS; guard by hand.
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{APP_ROLE}') THEN
+                CREATE ROLE {APP_ROLE}
+                    NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS INHERIT;
+            END IF;
+            EXECUTE format('GRANT CONNECT ON DATABASE %I TO {APP_ROLE}', current_database());
+        END $$;
+        """
+    )
+    op.execute(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}")
+
 
 def downgrade() -> None:
+    # The role is deliberately NOT dropped: it is cluster-wide, may have been
+    # given LOGIN by the operator (or by docker/initdb), and may be referenced
+    # by connection strings. Every table grant vanishes with the tables anyway.
+    op.execute(f"REVOKE USAGE ON SCHEMA public FROM {APP_ROLE}")
     # Reverse order; RESTRICT so we fail loudly rather than cascade-dropping
     # columns that still depend on these types.
     for name, _why in reversed(EXTENSIONS):
