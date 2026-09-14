@@ -197,3 +197,73 @@ BLX-2026-001 manifest is Priya Raman + Rafael Mendes; N650BX carries the insuran
 and AOC certificates; two passports expire within 180 days; zero lapsed ratings;
 zero overlapping legs on N650BX; and a seventh check confirms another tenant id
 sees nothing. All PASS.
+
+---
+
+## 2026-09-14 — Sprint 2: SQLModel ORM and repository layer
+
+**Prompt (abridged):** (0) Align `DATA_MODEL.md` §1.7 with the shipped role model,
+one commit. (1) Bootstrap with `sqlacodegen --generator sqlmodels`, then refactor
+into `app/models/` by migration cluster, with mixins, Python enums matching the
+PG types, UUIDv7 `default_factory`, relationships for parent/child edges only,
+plain deferrable FKs for the trip/quote/booking cycle, a read-only `AuditLog`,
+and an id-only `__repr__`. (2) `app/repositories/` with a tenant-safe
+`BaseRepository`, a contextvars `TenantContext` + transaction wrapper, and 17
+concrete repositories. (3) `polymorphic.py`. (4) 13 named pytest tests against
+the seeded DB. (5) Docs, commit. No FastAPI yet.
+
+**Bootstrap, and what it was used for.** `sqlacodegen` needs a *sync* driver to
+reflect, so it ran over `postgresql+psycopg://`, not the asyncpg URL. Its 3,305
+lines (47 enums, 37 tables, 14 partition classes) were the reference for how
+reflection renders the schema — which is exactly what `alembic check` compares
+against. The committed modules were then produced by a generator that replays
+migrations 003–012 against a recorder standing in for `alembic.op`, so every
+`Column`, `CheckConstraint` and `Index` in the models is the same object the
+DDL was built from; mixins, enums and relationships were layered on top. The
+generator is not committed (it would invite regenerating over hand edits); the
+sqlacodegen output was deleted once it had served, because a second set of
+mapped classes for the same tables is a metadata collision waiting to happen.
+
+**The bar: `alembic check` says "No new upgrade operations detected."** Models and
+live schema agree on 37 tables, 381 indexes (partial `WHERE`s included), 47 enum
+type names, server defaults, and both deferrable FKs. The one diff it found was
+real: migration 012 sets the `audit_logs` table comment twice (`create_table`,
+then `COMMENT ON`), and the model had the first.
+
+**Design points worth knowing:**
+
+- `client_id` is declared in exactly one file, `models/base.py` — `TenantColumnMixin`
+  (NOT NULL) and `OptionalTenantColumnMixin` (catalog rows, audit_logs). Mixins
+  use `sa_type` + `sa_column_kwargs`, never `sa_column`: a `Column` object can
+  belong to one `Table`, so a mixin-level `Column` breaks on the second subclass.
+- `pg_enum()` binds each Python enum to its PostgreSQL type by `__pg_name__` and
+  persists *values*, not member names. Names matching is what keeps autogenerate
+  from trying to recreate 47 enums.
+- Relationships exist only where there is one FK path between the two tables
+  (or the path is pinned with `foreign_keys`, as for `Trip.quotes` /
+  `Trip.bookings`). Anything through `users` (owner + created_by + updated_by),
+  self-references, the two-way trip↔empty-leg pair, and every polymorphic edge is
+  a plain column.
+- `AuditLog.__init__` raises; `before_update`/`before_delete` listeners raise;
+  `AuditLogRepository.append()` inserts through Core and never instantiates the
+  class. Three layers in Python before the database trigger even sees it.
+- `BaseRepository._base_query()` always applies `deleted_at IS NULL` and
+  `client_id = current_client_id()`. RLS is the guarantee; the predicate is
+  defence in depth *and* the reason a missing context is an exception, not an
+  empty list.
+- `tenant_transaction()` uses `set_config(name, value, is_local => true)` — the
+  bind-parameter-friendly spelling of `SET LOCAL`, same transaction scope.
+
+**Tests: 16 passed**, each inside a rolled-back transaction, connected as
+`bitlux_app` so RLS is real. Bugs the suite caught on the way:
+
+1. A nested `tenant_transaction()` for tenant B left PostgreSQL believing the
+   tenant was B after the block, while Python had reverted to the demo tenant —
+   every query then returned nothing. `set_config(..., true)` is transaction-
+   scoped, not savepoint-scoped, so the wrapper now records and restores the
+   outer tenant on exit. This is the kind of bug that produces "no data" in
+   production with no error anywhere.
+2. A failed flush poisons its session by design; the ORM-level immutability
+   check now runs in a throwaway session on the same connection.
+3. My own arithmetic: BLX-2026-002's margin is 442,000, also under the 600,000
+   threshold I had asserted would match only one trip.

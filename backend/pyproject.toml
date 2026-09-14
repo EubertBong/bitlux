@@ -1,0 +1,36 @@
+[project]
+name = "bitlux-crm-backend"
+version = "0.1.0"
+description = "Bitlux CRM backend: schema, ORM and repositories for a private aviation brokerage"
+requires-python = ">=3.10"
+dependencies = [
+    "alembic>=1.13",
+    "SQLAlchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "sqlmodel>=0.0.22",
+    # UUIDv7 generation lives in the application, not the database (DATA_MODEL 1.5).
+    "uuid-utils>=0.9",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    # sqlacodegen needs a sync driver to reflect; asyncpg cannot be used for that.
+    "sqlacodegen>=3.0",
+    "psycopg[binary]>=3.1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error::DeprecationWarning:app.*"]

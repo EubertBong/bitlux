@@ -7,13 +7,16 @@ SHELL := /bin/bash
 PY := backend/.venv/bin/python
 export DATABASE_URL ?= postgresql+asyncpg://bitlux:bitlux@localhost:5433/bitlux_crm
 
-.PHONY: help venv up down wait migrate downgrade partition-maintenance seed verify-seed psql psql-app reset
+.PHONY: help venv test up down wait migrate downgrade partition-maintenance seed verify-seed psql psql-app reset
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
-venv: ## Create backend/.venv and install requirements (needs uv)
-	cd backend && uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt
+venv: ## Create backend/.venv and install the backend (editable) with dev extras (needs uv)
+	cd backend && uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"
+
+test: ## Run the repository test-suite against the seeded local database (as bitlux_app)
+	cd backend && .venv/bin/python -m pytest -q
 
 up: ## Start postgres:16 (host port 5433)
 	docker compose up -d

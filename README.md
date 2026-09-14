@@ -15,7 +15,7 @@ A CRM for private aviation charter brokerage.
 Prerequisites: Docker (with Compose v2), Python 3.10+, and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
-make venv            # backend/.venv with alembic, asyncpg, sqlmodel, uuid-utils
+make venv            # backend/.venv: editable install of backend/pyproject.toml with dev extras
 make up wait         # postgres:16 on host port 5433 (5432 is left to a system Postgres)
 cp backend/.env.example backend/.env
 ```
@@ -90,6 +90,45 @@ Two things about how it writes:
 
 `make reset` destroys the local volume and rebuilds everything: up, migrate,
 partition maintenance, seed, verify.
+
+## ORM and Repository Layer
+
+```
+backend/app/models/         SQLModel classes, one module per migration cluster
+backend/app/repositories/   the only way application code touches a table
+backend/tests/              pytest, run as bitlux_app against the seeded demo tenant
+```
+
+**Models** (`app/models/`) mirror the migrations exactly — `alembic check` reports
+no difference between the classes and the live schema, partial indexes and enum
+type names included. Every tenant table inherits `TenantScopedMixin`
+(`id`, `client_id`, `created_at`, `updated_at`, `deleted_at`, `created_by`,
+`updated_by`) and declares none of those itself; the shared reference catalog
+uses `SharedCatalogMixin` (nullable `client_id`). Ids are UUIDv7 from
+`uuid_utils` — the database has no default. Polymorphic edges
+(`document_links`, `entity_tags`, `tasks`, `activities`, `audit_logs`) are not
+relationships; they are resolved through `app.repositories.polymorphic`. The
+circular `trips.accepted_quote_id` / `trips.booking_id` are plain deferrable FK
+columns. `AuditLog()` raises — the only writer is `AuditLogRepository.append()`.
+
+**Repositories** (`app/repositories/`) all descend from `BaseRepository`, whose
+`_base_query()` filters `deleted_at IS NULL` and adds
+`client_id = current_client_id()` — defence in depth on top of RLS, and a
+Python exception (`TenantContextMissing`) rather than an empty result when no
+tenant is set. Enter a tenant with:
+
+```python
+async with tenant_transaction(session, client_id, user_id):
+    trips = await TripRepository(session).by_status(TripStatus.CONFIRMED)
+```
+
+That sets `app.client_id` / `app.user_id` for the transaction (`set_config(...,
+is_local => true)`, the parameterisable `SET LOCAL`) and binds the Python
+context; nesting it for another tenant restores the outer one on exit.
+
+```bash
+make test        # 16 tests, each in a rolled-back transaction, as bitlux_app
+```
 
 ## Operational Runbook
 

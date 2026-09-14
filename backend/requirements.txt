@@ -1,6 +1,0 @@
-alembic>=1.13
-SQLAlchemy[asyncio]>=2.0.30
-asyncpg>=0.29
-sqlmodel>=0.0.22
-uuid-utils>=0.9
-python-dotenv>=1.0
