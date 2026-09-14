@@ -187,6 +187,18 @@ RLS is enabled with a tenant-isolation policy on every table (migration 014). It
 explicit about when it actually does anything, because it is easy to believe you are protected
 when you are not.
 
+**The role model as shipped** (migrations 001–015; details follow):
+
+| | |
+|---|---|
+| Application role | `bitlux_app` — `NOSUPERUSER NOBYPASSRLS`, owns nothing. Bootstrapped by **migration 001** (`NOLOGIN`, if absent) so it exists on Neon and in CI, not only where `docker/initdb/` ran. initdb's copy adds `LOGIN` + a dev password for local convenience, nothing more. |
+| Where privileges come from | **Every table-creating migration calls `grant_app_dml()` explicitly.** Nothing in the chain relies on `ALTER DEFAULT PRIVILEGES`. |
+| Ordinary tenant tables (36) | `SELECT, INSERT, UPDATE, DELETE` |
+| `audit_logs` | **`SELECT, INSERT` only.** No `UPDATE`, no `DELETE` (revoked from the role and from `PUBLIC` in 012, before the first partition exists). |
+| `audit_logs_*` partitions | **No direct privileges at all** — not even `SELECT`. Access is through the parent only; a partition has no RLS policy of its own. |
+| The invariant | **Migration 015 asserts** via `has_table_privilege('bitlux_app','audit_logs','UPDATE'/'DELETE')` that the above still holds at the end of the chain. `information_schema.role_table_grants` is deliberately *not* used: it lists direct grants only and misses privileges that arrive via `PUBLIC` or role membership — precisely how an accidental grant would arrive. |
+| RLS on every tenant table | `ENABLE` **and `FORCE ROW LEVEL SECURITY`**, so even a non-superuser owner is bound. Policies key on `current_client_id()`. |
+
 **Who RLS actually applies to.** Three tiers, and only the third is protected:
 
 | Role | Policies apply? |
@@ -206,15 +218,20 @@ owns nothing). `bitlux` owns the schema and runs migrations; `bitlux_app` is wha
 the application connects as and what RLS actually constrains. The same split is
 mandatory in production.
 
-**Where privileges come from — migrations, not defaults.** Migration 001 creates
-`bitlux_app` (`NOLOGIN`) if it does not exist, and every migration that creates a
-table grants that role exactly what the table needs, via `grant_app_dml()`:
+**Where privileges come from — migrations, not defaults.** The role bootstrap
+lives in migration 001 rather than in `docker/initdb/` so that a fresh Neon or CI
+database has the role before migration 003 first grants to it. Every migration
+that creates a table then grants that role exactly what the table needs, via
+`grant_app_dml()`:
 `SELECT, INSERT, UPDATE, DELETE` on ordinary tenant tables, and **`SELECT, INSERT`
 only on `audit_logs`** (migration 012, which also revokes `UPDATE, DELETE` from the
 role and from `PUBLIC` before the first partition exists). Migration 015 — the
 end of the chain — asserts with `has_table_privilege()` that `bitlux_app` still
 has neither `UPDATE` nor `DELETE` on `audit_logs`, so a later grant cannot undo
-it silently. Every write privilege in the schema is therefore an explicit,
+it silently. It uses `has_table_privilege()` and not
+`information_schema.role_table_grants` because the latter shows only direct
+grants; a privilege inherited through `PUBLIC` or through membership in another
+role is invisible to it, and that is the route an accident would take. Every write privilege in the schema is therefore an explicit,
 greppable line in a migration, and dev and prod get identical privileges from
 the same source.
 
@@ -226,9 +243,9 @@ read-plus-append is the floor; `UPDATE`/`DELETE` are never a default.
 **Partitions are reachable only through the parent.** PostgreSQL checks
 privileges on the table named in the query, so the parent's grant covers every
 `audit_logs_YYYY_MM`, and a partition has no RLS policy of its own — a direct
-grant on one would be a cross-tenant read. Migration 012 and
+grant on one, even `SELECT`, would be a cross-tenant read. Migration 012 and
 `scripts/partition_maintenance.py` both `REVOKE ALL` on each partition from the
-app role.
+app role: `bitlux_app` holds no privilege of any kind on any partition.
 
 The session variable used by every policy is `app.client_id`, read through a
 helper so an unset or empty value fails closed rather than raising:
