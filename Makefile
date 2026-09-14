@@ -7,7 +7,7 @@ SHELL := /bin/bash
 PY := backend/.venv/bin/python
 export DATABASE_URL ?= postgresql+asyncpg://bitlux:bitlux@localhost:5433/bitlux_crm
 
-.PHONY: help venv test api up down wait migrate downgrade partition-maintenance seed verify-seed psql psql-app reset
+.PHONY: help venv test api web web-install web-test web-build screenshots up down wait migrate downgrade partition-maintenance seed verify-seed psql psql-app reset
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
@@ -21,6 +21,21 @@ test: ## Run the repository + API test-suites against the seeded local database 
 PORT ?= 8000
 api: ## Run the API with reload on $(PORT) (docs at /api/v1/docs)
 	cd backend && .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port $(PORT)
+
+web-install: ## npm install the frontend
+	cd frontend && npm install --no-audit --no-fund
+
+web: ## Run the Vite dev server on :5173 (expects the API on :8000)
+	cd frontend && npm run dev
+
+web-test: ## Typecheck, lint and run the frontend test-suite
+	cd frontend && npm run typecheck && npm run lint && npm test
+
+web-build: ## Production build to frontend/dist
+	cd frontend && npm run build
+
+screenshots: ## Drive the running app with Chrome and write docs/screenshots/*.png
+	cd frontend && npm run screenshots
 
 up: ## Start postgres:16 (host port 5433)
 	docker compose up -d

@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     field_encryption_key: str = Field(default=_DEV_ONLY + "-fields", validation_alias=AliasChoices("APP_FIELD_ENCRYPTION_KEY", "FIELD_ENCRYPTION_KEY"))
 
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+
+    # Refresh token cookie (HttpOnly). The SPA keeps the access token in memory
+    # only and relies on this cookie to obtain a new one; it never sees or stores
+    # the refresh token. secure=None means "secure unless APP_ENV is local/test".
+    refresh_cookie_name: str = "bitlux_refresh"
+    refresh_cookie_secure: bool | None = None
+    refresh_cookie_samesite: str = "lax"  # 'none' (+ secure) if the SPA is on another site
     graph_max_nodes: int = 200
     search_default_limit: int = 5
     search_max_limit: int = 25
@@ -60,6 +67,14 @@ class Settings(BaseSettings):
     @property
     def is_local(self) -> bool:
         return self.env in ("local", "test")
+
+    @property
+    def refresh_cookie_is_secure(self) -> bool:
+        return (not self.is_local) if self.refresh_cookie_secure is None else self.refresh_cookie_secure
+
+    @property
+    def refresh_cookie_path(self) -> str:
+        return f"{self.api_prefix}/auth"  # only ever sent to the auth endpoints
 
     @property
     def fernet_key(self) -> bytes:

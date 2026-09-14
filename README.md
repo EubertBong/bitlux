@@ -146,6 +146,26 @@ operations on every resource, `GET /search` on the tsvector GIN indexes, and
 another tenant's row is a 404. Details, env vars, endpoint list and the auth flow
 are in **[backend/README.md](backend/README.md)**.
 
+## Frontend
+
+```bash
+make web-install && make web              # Vite dev server on http://localhost:5173 (API on :8000)
+make web-test                             # tsc + eslint + vitest
+make screenshots                          # docs/screenshots/*.png from the running app
+```
+
+Vite 6 / React 19 / TypeScript 5.9 / Tailwind 4, with React Router 7, TanStack
+Query + Table, shadcn-style components, react-hook-form + zod, D3 v7. The shell
+(sidebar, top bar with ⌘K search, mobile tab bar) is permission-gated from
+`/auth/me`; the access token lives in memory only and the refresh token in an
+HttpOnly cookie. `/clients` and `/clients/:id` are the fully implemented
+reference pages; every other route is a skeleton for Sprint 5. The hero is the
+**relationship visualiser** — `<RelationshipGraph>` over `/graph/{entity}/{id}`,
+embedded as a "Relationship" tab on every entity detail page. Details in
+**[frontend/README.md](frontend/README.md)**.
+
+![Client relationship graph](docs/screenshots/client-relationship-depth1.png)
+
 ## Operational Runbook
 
 ### `audit_logs` partitions — run `make partition-maintenance` monthly

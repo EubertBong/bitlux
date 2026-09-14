@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.models.enums import DocumentStatus, DocumentType, EntityType, StorageProvider
 
@@ -30,7 +30,7 @@ class DocumentBase(BaseModel):
     retention_until: Optional[date] = None
     uploaded_by_user_id: Optional[uuid.UUID] = None
     ocr_text: Optional[str] = None
-    metadata_: dict[str, Any] = Field(default_factory=dict, alias="metadata", serialization_alias="metadata")
+    metadata_: dict[str, Any] = Field(default_factory=dict, validation_alias=AliasChoices("metadata_", "metadata"), serialization_alias="metadata")
 
 
 class DocumentCreate(DocumentBase):
@@ -58,7 +58,7 @@ class DocumentUpdate(BaseModel):
     retention_until: Optional[date] = None
     uploaded_by_user_id: Optional[uuid.UUID] = None
     ocr_text: Optional[str] = None
-    metadata_: Optional[dict[str, Any]] = Field(default=None, alias="metadata", serialization_alias="metadata")
+    metadata_: Optional[dict[str, Any]] = Field(default=None, validation_alias=AliasChoices("metadata_", "metadata"), serialization_alias="metadata")
 
 
 class DocumentRead(DocumentBase):

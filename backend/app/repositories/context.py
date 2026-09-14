@@ -89,6 +89,9 @@ def tenant_context(
         _actor_type.reset(tokens[2])
 
 
+_depth: ContextVar[int] = ContextVar("bitlux_tenant_depth", default=0)
+
+
 @asynccontextmanager
 async def tenant_transaction(
     session: AsyncSession,
@@ -98,42 +101,57 @@ async def tenant_transaction(
 ) -> AsyncIterator[AsyncSession]:
     """Run a block inside a transaction that knows its tenant, on both sides.
 
-    * Begins a transaction (or a savepoint if one is already open -- which is
-      how the test-suite wraps every test in a rollback).
-    * Sets ``app.client_id`` and ``app.user_id`` with
-      ``set_config(name, value, is_local => true)``. That is the parameterisable
+    * The **outermost** call owns the transaction: it uses the one already open
+      on the session (SQLAlchemy autobegins on the first statement -- a login
+      lookup, say) or begins one, sets ``app.client_id`` / ``app.user_id`` for
+      it, and **commits on normal exit, rolls back on exception**. Nesting is
+      tracked explicitly, not inferred from ``session.in_transaction()``: an
+      autobegun transaction looked like "someone else's" and was left
+      uncommitted, so every login silently rolled back on session close.
+    * A **nested** call (inside another ``tenant_transaction``) runs in a
+      SAVEPOINT and restores the outer tenant's settings on exit, because
+      ``set_config(..., is_local => true)`` is transaction-scoped, not
+      savepoint-scoped.
+    * ``set_config(name, value, is_local => true)`` is the parameterisable
       spelling of ``SET LOCAL``: same transaction scope, same reset on
       COMMIT/ROLLBACK, but it accepts bind parameters, which ``SET`` does not.
       Transaction scope is what makes this safe under connection pooling.
     * Binds the Python contextvars for the duration of the block.
-    * Commits on normal exit, rolls back on exception.
     """
-    nested = session.in_transaction()
-    previous: tuple[str, str] | None = None
-    if nested:
-        # set_config(..., is_local => true) lives for the *transaction*, not the
-        # savepoint. When nesting inside another tenant's transaction, the outer
-        # tenant must be put back on exit or Python and PostgreSQL disagree about
-        # who the tenant is -- and every query silently returns nothing.
-        previous = tuple((await session.execute(text(
-            "SELECT coalesce(current_setting('app.client_id', true), ''), "
-            "       coalesce(current_setting('app.user_id', true), '')"
-        ))).one())
-    txn = session.begin_nested() if nested else session.begin()
-    with tenant_context(client_id, user_id, actor_type):
-        try:
-            async with txn:
-                await session.execute(
-                    text("SELECT set_config('app.client_id', :cid, true)"), {"cid": str(client_id)}
-                )
-                await session.execute(
-                    text("SELECT set_config('app.user_id', :uid, true)"),
-                    {"uid": str(user_id) if user_id else ""},
-                )
-                yield session
-        finally:
-            if previous is not None and session.in_transaction():
-                await session.execute(
-                    text("SELECT set_config('app.client_id', :cid, true), set_config('app.user_id', :uid, true)"),
-                    {"cid": previous[0], "uid": previous[1]},
-                )
+    depth = _depth.get()
+    token = _depth.set(depth + 1)
+    try:
+        with tenant_context(client_id, user_id, actor_type):
+            if depth == 0:
+                if not session.in_transaction():
+                    await session.begin()
+                try:
+                    await _set_tenant(session, client_id, user_id)
+                    yield session
+                except BaseException:
+                    await session.rollback()
+                    raise
+                else:
+                    await session.commit()
+            else:
+                previous = tuple((await session.execute(text(
+                    "SELECT coalesce(current_setting('app.client_id', true), ''), "
+                    "       coalesce(current_setting('app.user_id', true), '')"
+                ))).one())
+                try:
+                    async with session.begin_nested():
+                        await _set_tenant(session, client_id, user_id)
+                        yield session
+                finally:
+                    if session.in_transaction():
+                        await session.execute(
+                            text("SELECT set_config('app.client_id', :cid, true), set_config('app.user_id', :uid, true)"),
+                            {"cid": previous[0], "uid": previous[1]},
+                        )
+    finally:
+        _depth.reset(token)
+
+
+async def _set_tenant(session: AsyncSession, client_id: uuid.UUID, user_id: Optional[uuid.UUID]) -> None:
+    await session.execute(text("SELECT set_config('app.client_id', :cid, true)"), {"cid": str(client_id)})
+    await session.execute(text("SELECT set_config('app.user_id', :uid, true)"), {"uid": str(user_id) if user_id else ""})

@@ -25,11 +25,12 @@ class TokenPair(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    """The token may come in the body (API clients) or in the HttpOnly cookie (the SPA)."""
+    refresh_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 
 class MeResponse(BaseModel):

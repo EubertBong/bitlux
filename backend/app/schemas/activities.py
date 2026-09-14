@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.models.enums import ActivityDirection, ActivityType, EntityType
 
@@ -23,7 +23,7 @@ class ActivityBase(BaseModel):
     occurred_at: datetime
     duration_minutes: Optional[int] = None
     external_ref: Optional[str] = None
-    metadata_: dict[str, Any] = Field(default_factory=dict, alias="metadata", serialization_alias="metadata")
+    metadata_: dict[str, Any] = Field(default_factory=dict, validation_alias=AliasChoices("metadata_", "metadata"), serialization_alias="metadata")
 
 
 class ActivityCreate(ActivityBase):
@@ -44,7 +44,7 @@ class ActivityUpdate(BaseModel):
     occurred_at: Optional[datetime] = None
     duration_minutes: Optional[int] = None
     external_ref: Optional[str] = None
-    metadata_: Optional[dict[str, Any]] = Field(default=None, alias="metadata", serialization_alias="metadata")
+    metadata_: Optional[dict[str, Any]] = Field(default=None, validation_alias=AliasChoices("metadata_", "metadata"), serialization_alias="metadata")
 
 
 class ActivityRead(ActivityBase):

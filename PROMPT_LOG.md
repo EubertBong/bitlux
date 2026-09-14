@@ -366,3 +366,106 @@ credential columns, `auth_lookup_user`, the new search indexes) — the previous
 session had not done that, and the document's own rule is schema and doc in the
 same commit. `backend/README.md` added. The API suite takes ~45 s because argon2id
 at library defaults runs on every login fixture — acceptable, noted.
+
+---
+
+## 2026-09-14 — Sprint 4: frontend shell and the relationship visualiser
+
+**Prompt (abridged):** Vite 6 + React 19 + TS 5.9 + Tailwind 4 scaffold with the
+named libraries; auth (in-memory access token, HttpOnly refresh cookie, 401 →
+refresh → retry once); permission-gated shell; skeleton pages for every route;
+the D3 relationship graph as the hero, embedded as a tab on eight entity types;
+⌘K global search; `/clients` + `/clients/:id` fully implemented as the reference
+pattern; 15–20 Vitest/RTL tests; docs; screenshots. No other detail pages yet.
+
+**Backend change the brief implied.** "Memory + refresh token in an HttpOnly
+cookie" needs the API to *set* that cookie. `/auth/login` and `/auth/refresh` now
+set `bitlux_refresh` (HttpOnly, path-scoped to `/api/v1/auth`, SameSite=Lax,
+Secure outside local), `/auth/refresh` and `/auth/logout` accept it in place of a
+body, and logout clears it. Body tokens still work for non-browser clients. The
+SPA never sees the refresh token; the access token is a module-level variable in
+`src/lib/api.ts`. Verified in the screenshot run: `localStorage` and
+`sessionStorage` empty after login, `document.cookie` empty, the refresh cookie
+present in the browser jar with `httpOnly: true`.
+
+**Decisions worth knowing:**
+
+- **A Client is the tenant** (DATA_MODEL 3.1) and RLS shows a user one tenant, so
+  `/clients` lists the tenants you belong to — one row for the demo. The page
+  still implements the whole pattern (URL-backed page/sort/filters, TanStack
+  table, permission-gated create dialog) because that pattern is what Sprint 5
+  copies onto the multi-row resources. The brief's tab list (Segments, Contacts,
+  Passengers, Account Holders, Trips) only makes sense for the tenant root, which
+  confirms the reading. "Archive" suspends rather than soft-deletes: soft-deleting
+  the tenant root would hide it from RLS and lock everyone, including the
+  archiver, out.
+- **shadcn components are hand-written.** The CLI's flags changed again and it
+  hung on a prompt; the components are ~250 lines of Radix + cva + `cn` and it is
+  better to own them than to fight a generator.
+- **The graph is SVG only.** The backend caps depth 2 at 200 nodes, comfortably
+  inside SVG's budget; the brief allowed "SVG, virtualise if needed". Data
+  preparation (`simulation.ts`) is renderer-agnostic if canvas is ever wanted.
+- **D3 owns the numbers, React owns the DOM.** The simulation mutates node
+  positions and bumps a counter once per animation frame; zoom is a transform on
+  the inner `<g>`; drag behaviours are bound to the `<g>` elements React rendered.
+- **Search groups are the brief's eight plus Manufacturers and Aircraft models**,
+  otherwise the "gulf" demo returns nothing (Gulfstream is a manufacturer; the
+  aircraft are tail numbers). Both got skeleton routes so hits land somewhere.
+
+**Two backend bugs the browser found that the API suite could not.** The first
+screenshot run stalled on the Relationship tab, and the API log explained why:
+
+1. **Every login was silently rolled back.** `refresh_tokens` had zero rows and no
+   `login` audit row existed, although `/auth/login` returned 200 every time. The
+   handler runs `login_candidates()` *before* entering `tenant_transaction()`;
+   that first statement autobegins a session transaction, `tenant_transaction`
+   saw `in_transaction()` and treated itself as nested — a SAVEPOINT, released on
+   exit — and the autobegun outer transaction was never committed, so the
+   request-scoped session rolled it back on close. The test-suite is
+   structurally blind to this: its sessions already live inside a savepoint
+   chain where nothing ever needs a real commit to be visible. Fix: nesting is
+   now tracked explicitly (a depth contextvar); the outermost call *owns*
+   whatever transaction is open and commits it, savepoints are only for genuine
+   nesting. Regression tests now drive login through the ASGI app with real
+   per-request sessions and check visibility from a second connection, plus the
+   exact autobegin shape on its own.
+2. `GET /activities` (and `/documents`) returned 500: `metadata_: … Field(alias=
+   "metadata")` with `from_attributes=True` made pydantic read `.metadata` off
+   the SQLModel instance — SQLAlchemy's `MetaData` object, not the column.
+   `validation_alias=AliasChoices("metadata_", "metadata")` reads the attribute
+   and still accepts either spelling in JSON.
+
+Both are the same lesson as Sprint 2's nested-tenant bug: the seams between
+"works in the harness" and "works with real sessions" are where the silent
+failures live, and only an end-to-end run finds them.
+
+**jsdom versus a real browser, twice more.** (a) One vitest run kept ending with an
+"unhandled" `TypeError` from inside React's `act()`; the trace bottomed out in
+`d3-drag/src/nodrag.js`, which reads `event.view.document`, and user-event's
+synthetic mousedown in jsdom has `event.view === null`. d3-drag runs its `filter`
+before `nodrag`, so the drag filter now also requires an event that came from a
+window — a no-op in a browser. (b) The ⌘K palette passed its RTL test and opened
+in Chrome, yet Playwright's `getByLabel("Search query")` could not find the
+input: cmdk labels its input with `aria-labelledby` pointing at its own
+`<label>`, which is empty unless `Command` is given `label`, and `aria-labelledby`
+beats `aria-label` in the accessible-name computation. RTL matches `aria-label`
+directly, so jsdom was satisfied while every screen reader would have heard
+nothing. `CommandDialog` now passes its title as the `Command` label. The
+screenshot script also learned that Ctrl+K in headless Chrome is a *browser*
+shortcut that navigates away — the shortcut is covered by the unit test; the
+e2e path opens the palette by its button.
+
+**Bugs the frontend suite caught:** binding d3-drag with a keyed data join
+(`.data(nodes, d => d.id)`) crashed because d3 evaluates the key on the existing
+React-rendered elements, which carry no datum yet — replaced with a per-element
+`datum()` bind by `data-node` id. `.transition()` needs `d3-transition` imported
+for its `Selection` augmentation.
+
+**Verified:** 21 Vitest tests and 35 backend tests pass (graph: node/edge counts, type filter,
+depth refetch, error+retry, click navigation; search: 200 ms debounce,
+grouping/routing; clients: rows, paging, tabs, embedded graph; auth: redirect,
+forbidden, manage-implies, login redirect; API client: 401→refresh→retry once,
+give-up path, error envelope; nav gating; formatters). `tsc --noEmit` and eslint
+(no `any`, no `@ts-ignore`) clean. Screenshots in `docs/screenshots/`: client
+Relationship tab at depth 1 and 2 (81 nodes / 117 edges at depth 2 on the demo
+client), ⌘K search for "gulf", client overview, dashboard.

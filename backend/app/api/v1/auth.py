@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -23,6 +23,25 @@ from app.security.passwords import needs_rehash, verify_password, hash_password
 from app.security.tokens import TokenError, decode, fingerprint, issue
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    """The SPA's copy of the refresh token: HttpOnly, scoped to /auth, never readable by JS."""
+    s = get_settings()
+    response.set_cookie(
+        key=s.refresh_cookie_name, value=token, httponly=True, secure=s.refresh_cookie_is_secure,
+        samesite=s.refresh_cookie_samesite, path=s.refresh_cookie_path, max_age=s.refresh_token_ttl_days * 86400,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    s = get_settings()
+    response.delete_cookie(key=s.refresh_cookie_name, path=s.refresh_cookie_path, httponly=True,
+                           secure=s.refresh_cookie_is_secure, samesite=s.refresh_cookie_samesite)
+
+
+def _presented_refresh_token(request: Request, body_token: str | None) -> str | None:
+    return body_token or request.cookies.get(get_settings().refresh_cookie_name)
 
 
 async def _issue_pair(session: AsyncSession, user_id: uuid.UUID, client_id: uuid.UUID, role: str, request: Request) -> TokenPair:
@@ -38,7 +57,7 @@ async def _issue_pair(session: AsyncSession, user_id: uuid.UUID, client_id: uuid
 
 
 @router.post("/login", response_model=TokenPair, summary="Email + password -> access and refresh tokens")
-async def login(body: LoginRequest, request: Request, session: AsyncSession = Depends(get_session)) -> TokenPair:
+async def login(body: LoginRequest, request: Request, response: Response, session: AsyncSession = Depends(get_session)) -> TokenPair:
     candidates = await UserRepository(session).login_candidates(str(body.email), body.client_slug)
     if len(candidates) > 1:
         raise Conflict("This email exists in more than one tenant; supply client_slug", details={"tenants": sorted(c.client_slug for c in candidates)})
@@ -58,6 +77,7 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
             updates["password_hash"] = hash_password(body.password)
         await users.update(cand.user_id, updates)
         pair = await _issue_pair(session, cand.user_id, cand.client_id, cand.role.value, request)
+        _set_refresh_cookie(response, pair.refresh_token)
         await AuditLogRepository(session).append(AuditEvent(
             action=AuditAction.LOGIN, entity_type=EntityType.USER, entity_id=cand.user_id,
             actor_label=str(body.email), actor_type=ActorType.USER, ip_address=request.client.host if request.client else None,
@@ -67,38 +87,50 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
 
 
 @router.post("/refresh", response_model=TokenPair, summary="Refresh token -> new access token (refresh is rotated)")
-async def refresh(body: RefreshRequest, request: Request, session: AsyncSession = Depends(get_session)) -> TokenPair:
+async def refresh(request: Request, response: Response, body: RefreshRequest | None = None,
+                  session: AsyncSession = Depends(get_session)) -> TokenPair:
+    presented = _presented_refresh_token(request, body.refresh_token if body else None)
+    if not presented:
+        raise Unauthorized("No refresh token presented")
     try:
-        claims = decode(body.refresh_token, "refresh")
+        claims = decode(presented, "refresh")
     except TokenError as e:
+        _clear_refresh_cookie(response)
         raise Unauthorized(str(e)) from e
     async with tenant_transaction(session, claims.client_id, claims.user_id):
         request.state.user_id, request.state.client_id = str(claims.user_id), str(claims.client_id)
         tokens = RefreshTokenRepository(session)
-        row = await tokens.by_hash(fingerprint(body.refresh_token))
+        row = await tokens.by_hash(fingerprint(presented))
         if row is None or not row.is_active or row.user_id != claims.user_id:
             # A replayed (already rotated) token is a red flag: revoke the whole family.
             if row is not None and row.revoked_at is not None:
                 await tokens.revoke_all_for_user(claims.user_id)
+            _clear_refresh_cookie(response)
             raise Unauthorized("Refresh token is invalid or has been revoked")
         user = await UserRepository(session).get(claims.user_id)
         if user is None or user.status != UserStatus.ACTIVE:
             raise Unauthorized("Account is not active")
         pair = await _issue_pair(session, user.id, claims.client_id, user.role.value, request)
         await tokens.revoke(row.id, replaced_by=decode(pair.refresh_token, "refresh").jti)
+        _set_refresh_cookie(response, pair.refresh_token)
         return pair
 
 
 @router.post("/logout", status_code=204, summary="Revoke a refresh token")
-async def logout(body: LogoutRequest, request: Request, session: AsyncSession = Depends(get_session)) -> None:
+async def logout(request: Request, response: Response, body: LogoutRequest | None = None,
+                 session: AsyncSession = Depends(get_session)) -> None:
+    _clear_refresh_cookie(response)
+    presented = _presented_refresh_token(request, body.refresh_token if body else None)
+    if not presented:
+        return None
     try:
-        claims = decode(body.refresh_token, "refresh")
+        claims = decode(presented, "refresh")
     except TokenError:
         return None  # already unusable; logout is idempotent
     async with tenant_transaction(session, claims.client_id, claims.user_id):
         request.state.user_id, request.state.client_id = str(claims.user_id), str(claims.client_id)
         tokens = RefreshTokenRepository(session)
-        row = await tokens.by_hash(fingerprint(body.refresh_token))
+        row = await tokens.by_hash(fingerprint(presented))
         if row is not None and row.revoked_at is None:
             await tokens.revoke(row.id)
             await AuditLogRepository(session).append(AuditEvent(
