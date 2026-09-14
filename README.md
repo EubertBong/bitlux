@@ -168,6 +168,34 @@ embedded as a "Relationship" tab on every entity detail page. Details in
 
 ![Client relationship graph](docs/screenshots/client-relationship-depth1.png)
 
+## Deployment
+
+| Layer    | Where                         | URL                                              |
+|----------|-------------------------------|--------------------------------------------------|
+| Backend  | Render, Docker web service (free) | https://bitlux-api.onrender.com (expected; confirm after the first deploy) |
+| Frontend | Cloudflare Pages (free)        | fill in after the Cloudflare deploy, e.g. https://bitlux-crm.pages.dev |
+| Database | Neon, PostgreSQL 16 (free)     | two roles: the owner for migrations, `bitlux_app` for the API |
+
+Cost: $0. Render's free instance spins down after 15 idle minutes (first request
+then takes up to a minute) and Neon's free compute autosuspends after 5; both are
+cosmetic for a demo and a free uptime monitor on `/health` hides the former.
+
+Config lives in the repo: `render.yaml` + `backend/Dockerfile`, Cloudflare's
+`frontend/public/_headers` and `_redirects`, a build-time guard that fails the
+frontend build if `VITE_API_BASE_URL` is unset, CI in `.github/workflows/ci.yml`,
+and a monthly `partition-maintenance.yml`. The step-by-step runbook, including the
+role split the API enforces at startup, is **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+
+```bash
+export DATABASE_URL='postgresql://<owner>:<pw>@<endpoint>.neon.tech/bitlux_crm?sslmode=require'
+make db-check-prod                 # SELECT 1 + role / server / alembic head
+make app-role-prod                 # create bitlux_app (needs APP_DB_PASSWORD); prints APP_DATABASE_URL
+make migrate-prod                  # alembic upgrade head
+make partition-maintenance-prod    # audit_logs partitions, 12 months ahead
+make seed-prod                     # demo tenant, 5-second abort window
+make docker-build docker-run       # the Render image, locally, against docker-compose
+```
+
 ## Operational Runbook
 
 ### `audit_logs` partitions — run `make partition-maintenance` monthly

@@ -87,7 +87,10 @@ inside SVG's budget; canvas can be added behind the same data preparation if the
 
 ## Deploy
 
-Static build (`npm run build` → `dist/`). `vercel.json` rewrites every non-`/api/` path to
-`index.html` for client-side routing. Set `VITE_API_BASE_URL` to the API origin at build time
-and make sure the API's `APP_CORS_ORIGINS` includes the SPA origin; if the SPA and API are on
-different sites, set `APP_REFRESH_COOKIE_SAMESITE=none` (which requires HTTPS).
+Cloudflare Pages, root directory `frontend`, build `npm run build`, output `dist`.
+`public/_redirects` rewrites every path to `index.html` for client-side routing and
+`public/_headers` adds the security headers; both are copied into `dist/` by Vite.
+`vite.config.ts` throws at build time if `VITE_API_BASE_URL` is not set (locally it
+comes from `frontend/.env`). The API on Render is another site, so its
+`REFRESH_COOKIE_SAMESITE=none` + `REFRESH_COOKIE_SECURE=true` and its `CORS_ORIGINS`
+must name the exact Pages origin. Full sequence: [docs/DEPLOY.md](../docs/DEPLOY.md).

@@ -545,3 +545,71 @@ this suite — the theme menu or a bare one with no theme code — leaves work p
 that stalls the `afterEach` `act()` flush for ~15 s. The Vitest coverage therefore
 exercises `setTheme()` directly and the toggle's trigger state, and leaves the
 open/select/persist path to the Chrome script, where it is asserted for real.
+
+## 2026-09-14 — Sprint 5A: deployment config (Render + Cloudflare Pages + Neon) and CI
+
+**Prompt (abridged):** Dockerfile + `render.yaml`; `/health` with a DB probe (200 /
+503, no auth, no tenant context); config reading `DATABASE_URL`, `CORS_ORIGINS`,
+`JWT_*`, `REFRESH_COOKIE_*`; `make {migrate,seed,partition-maintenance,db-check}-prod`;
+monthly partition workflow; Cloudflare `_headers` / `_redirects` and a build-time
+`VITE_API_BASE_URL` guard; CI for both halves; `docs/DEPLOY.md`; README; commit. Do
+not deploy.
+
+**Where the brief and the codebase disagreed, and what was done:**
+
+- **`DATABASE_URL` vs `APP_DATABASE_URL`.** The brief asked the runtime to read plain
+  `DATABASE_URL`. That name is the schema *owner* (alembic, seed, maintenance);
+  the API must connect as `bitlux_app`, because superusers and `BYPASSRLS` roles are
+  not bound by the tenant policies and Neon's console roles carry `BYPASSRLS`.
+  Collapsing the two would have deployed the API with tenant isolation silently
+  off. Kept `APP_DATABASE_URL` for the runtime, made `render.yaml` ask for that
+  name, and added a startup check that refuses to serve as a role with
+  `rolsuper`/`rolbypassrls` (verified: the image exits with a clear message when
+  given the owner URL). Every other variable now accepts the plain name the brief
+  lists as well as the `APP_` form. In non-local envs, an unset
+  `APP_DATABASE_URL` and `SameSite=none` without `Secure` are startup errors.
+- **CORS parsing was broken for the documented format.** pydantic-settings insists
+  a `list[str]` env value is JSON, so the comma-separated form in `.env.example`
+  raised at startup and the `_split_csv` validator never ran. `NoDecode` +
+  a validator that accepts both forms and strips trailing slashes.
+- **Neon URLs would have crashed the engine.** SQLAlchemy forwards unknown query
+  parameters to `asyncpg.connect()`, which has no `sslmode` or `channel_binding`.
+  `asyncpg_engine_args()` rewrites the scheme, drops both, and maps `sslmode` onto
+  asyncpg's `ssl=`. asyncpg's own DSN parser (used by the scripts) accepts both.
+- **Dockerfile.** As specified, plus: two `uv sync` passes (`--no-install-project`
+  before `COPY . .`) so the dependency layer caches; `PORT` honoured because
+  Render injects it; `.dockerignore` keeps `.venv`, `.env` and tests out of the
+  context. Image is ~1 GB because `build-essential`/`libpq-dev` stay in the final
+  layer as the brief specified; a multi-stage build would halve it.
+- **`render.yaml`** adds `APP_ENV=production` (without it the dev-default secret
+  check does not run) and `FIELD_ENCRYPTION_KEY` (`generateValue`), which the brief
+  omitted and which the startup check requires.
+- **CI** runs from `backend/` with `--extra dev` (pytest is an optional extra, not a
+  dependency group), publishes the Postgres port, creates the `bitlux_app` role
+  from the same initdb SQL docker-compose uses, and runs migrate → check →
+  partition-maintenance → seed → verify-seed → pytest, because the test-suite runs
+  as `bitlux_app` against seeded data. The frontend job also runs `npm run build`
+  with the variable set so the guard is exercised. The whole backend job was
+  rehearsed locally against a throwaway `postgres:16` on :5434: all green.
+- **Cloudflare** files as specified; `vercel.json` removed. The build guard uses
+  `loadEnv` merged with `process.env` so `frontend/.env` still satisfies it locally.
+- **Ops scripts.** `scripts/db_check.py` (SELECT 1, role kind, server version,
+  alembic head, `bitlux_app` state) and `scripts/app_role.py` (idempotent
+  `bitlux_app` LOGIN role + grants, prints the `APP_DATABASE_URL` to paste into
+  Render), because Neon has no initdb hook. `*-prod` targets refuse an unset or
+  localhost `DATABASE_URL` and echo the redacted target first.
+- **Runbook corrections.** Demo credentials are `owner@demo.test` / `Demo!2026`
+  (not `demo@demo.test`); the cookie is `bitlux_refresh` on `Path=/api/v1/auth`;
+  migration 001 creates only `citext` and `ltree`. Added the third-party-cookie
+  caveat: `*.pages.dev` → `*.onrender.com` is cross-site, so Safari and strict
+  browsers drop the refresh cookie; custom domains on one site are the real fix.
+
+**Verification (nothing deployed).** 35 backend tests; frontend tsc/eslint/25 tests;
+`docker build` of the Render image and four runs: `/health` 200 as `bitlux_app`
+with production settings, preflight from the Pages origin allowed with
+credentials, login `Set-Cookie ... SameSite=none; Secure`; `/health` 503 with the
+database unreachable; refusal to start as the owner; clear error with
+`APP_DATABASE_URL` unset. `vite build` fails without `VITE_API_BASE_URL` and
+succeeds with it, `dist/` containing `_headers` and `_redirects`. `make
+db-check-prod` / `app-role-prod` exercised against the local stack (password
+restored). YAML parsed; `uv sync --frozen --extra dev` resolves.

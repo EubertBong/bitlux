@@ -1,0 +1,55 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bitlux
+          POSTGRES_PASSWORD: bitlux
+          POSTGRES_DB: bitlux_crm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-retries 5
+    env:
+      # Owner url: migrations, seed, partition maintenance (same split as docker-compose).
+      DATABASE_URL: postgresql+asyncpg://bitlux:bitlux@localhost:5432/bitlux_crm
+      # Runtime / test-suite url: the non-superuser role, so RLS is actually exercised.
+      APP_DATABASE_URL: postgresql+asyncpg://bitlux_app:bitlux_app@localhost:5432/bitlux_crm
+      APP_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install uv && uv sync --frozen --extra dev
+      - name: Create the application role (docker-compose does this via initdb locally)
+        run: psql "postgresql://bitlux:bitlux@localhost:5432/bitlux_crm" -v ON_ERROR_STOP=1 -f ../docker/initdb/10-app-role.sql
+      - run: uv run alembic upgrade head
+      - run: uv run alembic check
+      - run: uv run python scripts/partition_maintenance.py
+      - run: uv run python scripts/seed.py
+      - run: uv run python scripts/verify_seed.py
+      - run: uv run pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test -- --run
+      - name: Production build (same command as Cloudflare Pages)
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: https://bitlux-api.onrender.com/api/v1

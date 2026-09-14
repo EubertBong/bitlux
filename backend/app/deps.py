@@ -13,7 +13,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
-from app.config import get_settings
+from app.config import asyncpg_engine_args, get_settings
 from app.errors import PermissionDenied, Unauthorized
 from app.models import User
 from app.models.enums import UserStatus
@@ -29,7 +29,8 @@ def engine() -> AsyncEngine:
     global _engine, _sessions
     if _engine is None:
         s = get_settings()
-        _engine = create_async_engine(s.database_url, pool_size=s.db_pool_size, echo=s.db_echo, pool_pre_ping=True)
+        url, connect_args = asyncpg_engine_args(s.database_url)
+        _engine = create_async_engine(url, connect_args=connect_args, pool_size=s.db_pool_size, echo=s.db_echo, pool_pre_ping=True)
         _sessions = async_sessionmaker(_engine, expire_on_commit=False)
     return _engine
 

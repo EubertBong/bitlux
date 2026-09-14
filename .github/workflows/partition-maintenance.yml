@@ -1,0 +1,22 @@
+name: Monthly partition maintenance
+
+# Keeps 12 months of audit_logs partitions ahead on the production database and
+# fails if anything has landed in the default partition. Needs the repository
+# secret PROD_DATABASE_URL = the Neon OWNER url (partitions are DDL).
+on:
+  schedule:
+    - cron: '0 3 1 * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install uv && uv sync --frozen
+      - run: uv run python scripts/partition_maintenance.py --months 12
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}

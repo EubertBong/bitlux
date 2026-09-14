@@ -7,7 +7,8 @@ SHELL := /bin/bash
 PY := backend/.venv/bin/python
 export DATABASE_URL ?= postgresql+asyncpg://bitlux:bitlux@localhost:5433/bitlux_crm
 
-.PHONY: help venv test api web web-install web-test web-build screenshots verify-ui up down wait migrate downgrade partition-maintenance seed verify-seed psql psql-app reset
+.PHONY: help venv test api web web-install web-test web-build screenshots verify-ui up down wait migrate downgrade partition-maintenance seed verify-seed psql psql-app reset \
+	db-check-prod app-role-prod migrate-prod partition-maintenance-prod seed-prod docker-build docker-run
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
@@ -76,3 +77,46 @@ psql-app: ## psql as the application role (RLS enforced; remember SET LOCAL app.
 reset: ## DESTROY the local volume, then up + migrate + partition-maintenance + seed + verify-seed
 	docker compose down -v
 	$(MAKE) up wait migrate partition-maintenance seed verify-seed
+
+# ---------------------------------------------------------------------------
+# Production database (Neon). Every *-prod target runs against $DATABASE_URL,
+# which must be the Neon OWNER url, explicitly exported -- the local default
+# above is refused. Redacted before it is echoed.
+#   export DATABASE_URL='postgresql://<owner>:<pw>@<host>.neon.tech/bitlux_crm?sslmode=require'
+# ---------------------------------------------------------------------------
+REDACTED_URL = $$(printf '%s' "$$DATABASE_URL" | sed -E 's,://([^:/@]+)(:[^@]*)?@,://\1:***@,')
+define require_prod_url
+	@if [ -z "$$DATABASE_URL" ] || printf '%s' "$$DATABASE_URL" | grep -Eq 'localhost|127\.0\.0\.1'; then \
+	  echo "DATABASE_URL must be exported and point at the production database (it is unset or the local default)." >&2; exit 1; fi
+	@echo "target: $(REDACTED_URL)"
+endef
+
+db-check-prod: ## SELECT 1 against $$DATABASE_URL; prints role, server, alembic head; exit 1 on failure
+	$(require_prod_url)
+	cd backend && .venv/bin/python scripts/db_check.py
+
+app-role-prod: ## Create/update the bitlux_app LOGIN role on $$DATABASE_URL (needs APP_DB_PASSWORD=...)
+	$(require_prod_url)
+	cd backend && .venv/bin/python scripts/app_role.py
+
+migrate-prod: ## alembic upgrade head against $$DATABASE_URL
+	$(require_prod_url)
+	cd backend && .venv/bin/alembic upgrade head
+
+partition-maintenance-prod: ## Ensure 12 months of audit_logs partitions on $$DATABASE_URL
+	$(require_prod_url)
+	cd backend && .venv/bin/python scripts/partition_maintenance.py
+
+seed-prod: ## Insert/refresh the Demo Brokerage tenant on $$DATABASE_URL (5-second abort window)
+	$(require_prod_url)
+	@echo "About to write the DEMO tenant (owner@demo.test / broker@ / ops@, password Demo!2026) into the database above."
+	@echo "This is idempotent but it is demo data on a production database. Ctrl-C within 5 seconds to abort."
+	@for i in 5 4 3 2 1; do printf '  %s...\r' $$i; sleep 1; done; echo
+	cd backend && .venv/bin/python scripts/seed.py
+
+docker-build: ## Build the API image exactly as Render does (context = backend/)
+	docker build -t bitlux-api backend
+
+docker-run: ## Run the image against the local stack on :8000 (APP_DATABASE_URL -> bitlux_app on host 5433)
+	docker run --rm --network host -e APP_ENV=local \
+	  -e APP_DATABASE_URL=postgresql+asyncpg://bitlux_app:bitlux_app@127.0.0.1:5433/bitlux_crm bitlux-api

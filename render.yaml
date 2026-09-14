@@ -1,0 +1,38 @@
+# Render Blueprint -- https://render.com/docs/blueprint-spec
+#
+# Env vars marked `sync: false` are entered once in the Render dashboard and
+# never stored here. `generateValue: true` secrets are minted by Render on first
+# deploy and then kept stable (FIELD_ENCRYPTION_KEY in particular must never
+# rotate: it decrypts the [enc] columns).
+services:
+  - type: web
+    name: bitlux-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      # Runtime connection. MUST be the bitlux_app role (NOSUPERUSER, NOBYPASSRLS),
+      # not the Neon owner role: the API refuses to start as a role that bypasses
+      # row-level security. `make app-role-prod` creates it. See docs/DEPLOY.md.
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: FIELD_ENCRYPTION_KEY
+        generateValue: true
+      # JSON list or comma-separated, exact origins, no trailing slash:
+      #   ["https://bitlux-crm.pages.dev"]
+      - key: CORS_ORIGINS
+        sync: false
+      # The SPA (Cloudflare Pages) and the API (Render) are different sites, so the
+      # HttpOnly refresh cookie must be SameSite=None + Secure.
+      - key: REFRESH_COOKIE_SAMESITE
+        value: none
+      - key: REFRESH_COOKIE_SECURE
+        value: "true"
