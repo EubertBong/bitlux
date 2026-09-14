@@ -196,6 +196,15 @@ make seed-prod                     # demo tenant, 5-second abort window
 make docker-build docker-run       # the Render image, locally, against docker-compose
 ```
 
+## Known limitations (test project)
+
+- **`[enc]` columns use a placeholder in the demo seed; production requires a
+  KMS-backed key hierarchy.** The API itself encrypts passport numbers, KTNs,
+  redress numbers, tax IDs and crew licence numbers on write with a single Fernet
+  key and never returns them (only `*_last4`), but `scripts/seed.py` writes
+  marked plaintext bytes into those columns instead. Details and the production
+  requirements are in [DATA_MODEL.md §1.2.1](DATA_MODEL.md#121-encryption-status-test-project-scope).
+
 ## Operational Runbook
 
 ### `audit_logs` partitions — run `make partition-maintenance` monthly

@@ -43,6 +43,12 @@ remembers with a boolean `bitlux-session` flag in `localStorage` (set on login, 
 logout). The flag is not a credential; it just avoids a guaranteed 401 on a first visit.
 Permissions come from `/auth/me`; `RequirePermission` and the sidebar use the same `can()`.
 
+**Sensitive fields never reach the browser.** The API does not return raw `[enc]`
+values (passport / travel-document numbers, known-traveler and redress numbers, tax
+IDs, crew licence numbers); read models carry only the `*_last4` companions, which is
+what the UI renders. Forms send the plaintext once on create/update and the API
+encrypts it. See `DATA_MODEL.md` §1.2.1 for the encryption scope of this test project.
+
 ## Theme
 
 Light / dark / system, chosen from the toggle next to the avatar and stored under

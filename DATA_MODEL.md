@@ -69,8 +69,45 @@ IDX  (client_id, id) WHERE deleted_at IS NULL     -- live-row covering probe
 | RLS | `USING (client_id = current_setting('app.client_id')::uuid)` on every tenant table. Shared-catalog tables use `USING (client_id IS NULL OR client_id = current_setting('app.client_id')::uuid)`. |
 | Enums | Native PG `ENUM`. Values are `snake_case`. Enums are **append-only** in migrations (`ALTER TYPE … ADD VALUE`); a value is never renamed or removed once shipped. |
 | JSONB | Used only for genuinely open-ended attribute bags (preferences, amenities, feature flags). Never for anything that gets filtered, joined, or reported on. |
-| Encryption | Fields marked **[enc]** are encrypted application-side (envelope encryption, tenant-scoped DEK), stored `bytea`, with a plaintext `*_last4` for display/search. Passport numbers, KTN, tax IDs, crew license numbers. |
+| Encryption | Fields marked **[enc]** are encrypted application-side (envelope encryption, tenant-scoped DEK), stored `bytea`, with a plaintext `*_last4` for display/search. Passport numbers, KTN, tax IDs, crew license numbers. What this test project actually implements: §1.2.1. |
 | Search | `search_tsv tsvector GENERATED ALWAYS AS (…) STORED` + GIN on the entity tables users type into (contacts, passengers, operators, aircraft, airports; manufacturers and aircraft models since 016). Trip and quote numbers use expression GIN indexes on `to_tsvector('simple', …)`. `/search` uses `websearch_to_tsquery` plus a prefix term; nothing uses `ILIKE`. |
+
+### 1.2.1 Encryption status (test project scope)
+
+The `[enc]` columns in this schema (`travel_documents.number`,
+`passengers.known_traveler_number`, `passengers.redress_number`,
+`account_holders.tax_id`, `crew_members.license_number`) are **designed** for
+per-tenant envelope encryption with a KMS-managed key hierarchy: a Data Encryption
+Key per tenant, wrapped by a master Key Encryption Key that never leaves the KMS.
+
+What this test project actually ships:
+
+- The columns are typed `bytea` as designed, and the `*_last4` companion columns
+  are populated correctly everywhere.
+- **The API encrypts on write** (`app/api/v1/_crud.py` → `app/security/crypto.py`)
+  with a **single Fernet key** derived from the `APP_FIELD_ENCRYPTION_KEY` string.
+  There is no per-tenant key, no KMS, and no rotation or re-encryption path.
+- **The API never decrypts and never returns the raw column.** Read schemas expose
+  only the `*_last4` variant; `redress_number`, which has no last4 column, is not
+  exposed at all. `crypto.decrypt()` exists but has no caller.
+- **The demo seed does not encrypt.** `scripts/seed.py` writes
+  `b"demo-plaintext:" + value` into the `[enc]` columns through `enc()`, a
+  placeholder whose docstring says so. Those bytes are not Fernet ciphertext and
+  cannot be decrypted; nothing reads them, and the `*_last4` columns beside them
+  carry the display value. The seed must never be pointed at real data.
+- Audit `before`/`after` snapshots drop these fields (`crypto.redact()`), so the
+  trail never carries plaintext, as §1.2 and §5 require.
+
+Production deployment would additionally require:
+
+- A KMS (AWS KMS, GCP Cloud KMS, HashiCorp Vault) holding the master KEK.
+- Per-tenant DEKs wrapped by that KEK, cached per process, with a key-id stored
+  next to each ciphertext so rotation can re-wrap without a full rewrite.
+- A repository-layer wrapper replacing the current single-key calls: encrypt on
+  write with the tenant's DEK, decrypt on read **only** on explicitly authorised
+  paths (manifest filing, document verification), each decrypt audit-logged.
+- Audit-log redaction for `[enc]` fields (already enforced; see above).
+- A seed path that either uses the real wrapper or leaves the `[enc]` columns NULL.
 
 ### 1.3 Shared reference catalog
 
@@ -1704,7 +1741,9 @@ this client". Merging them would make the audit trail untrustworthy.
 **Encryption boundary.** Passport numbers, KTN, crew license numbers and tax IDs are envelope-
 encrypted with a per-tenant DEK. The `*_last4` columns exist so staff can confirm a document
 without decrypting. `audit_logs.before/after` must be redacted for these fields — an audit trail
-that logs plaintext passport numbers defeats the encryption entirely.
+that logs plaintext passport numbers defeats the encryption entirely. This is the design target;
+the shipped state of this test project (single static key at the API, placeholder in the seed) is
+stated in §1.2.1.
 
 ---
 

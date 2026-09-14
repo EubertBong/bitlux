@@ -84,10 +84,13 @@ def audit_at(step: int, hours: int = 0) -> datetime:
 
 
 def enc(plain: str) -> bytes:
-    """Placeholder for the application's envelope encryption ([enc] columns).
+    """Placeholder for the application's field encryption ([enc] columns).
 
-    NOT encryption. The demo has no key hierarchy; production must never write
-    bytes like these. The *_last4 columns beside them hold the real display value.
+    WARNING -- NOT ENCRYPTION. This writes the value as marked plaintext bytes.
+    The API encrypts these columns with Fernet (app/security/crypto.py); the seed
+    does not, so its rows are not decryptable and must never be real data. Nothing
+    reads the column back -- the *_last4 columns beside it hold the display value
+    and the API never returns the raw column. Scope statement: DATA_MODEL.md 1.2.1.
     """
     return b"demo-plaintext:" + plain.encode()
 

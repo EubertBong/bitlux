@@ -144,4 +144,6 @@ indistinguishable from a missing one — nothing leaks) · `conflict` 409 · `va
 are accepted as plaintext on write, stored as Fernet ciphertext with a `*_last4` beside them, and
 **never returned**; only the `*_last4` appears in any schema. Audit `before`/`after` snapshots
 drop them entirely. `test_encrypted_fields_not_in_response` asserts the plaintext is absent from
-every response body that could carry it.
+every response body that could carry it. Scope caveat: this is one static Fernet key, not the
+per-tenant KMS-backed hierarchy the design calls for, and the demo seed bypasses it with a
+marked-plaintext placeholder — see `DATA_MODEL.md` §1.2.1.

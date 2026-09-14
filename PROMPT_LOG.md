@@ -613,3 +613,20 @@ database unreachable; refusal to start as the owner; clear error with
 succeeds with it, `dist/` containing `_headers` and `_redirects`. `make
 db-check-prod` / `app-role-prod` exercised against the local stack (password
 restored). YAML parsed; `uv sync --frozen --extra dev` resolves.
+
+## 2026-09-14 — Encryption placeholder scope stated explicitly
+
+**Prompt (abridged):** Before deploying, document that the seed's `[enc]` values are
+a placeholder, not ciphertext: new DATA_MODEL §1.2.1, a README "Known limitations"
+bullet, a frontend/API note that raw `[enc]` values are never returned, PROMPT_LOG.
+
+**What the code actually does (checked, not assumed):** `scripts/seed.py::enc()`
+returns `b"demo-plaintext:" + value` — marked plaintext, not Fernet output, with a
+docstring that already said so (now sharpened). The API is further along than the
+brief assumed: `_crud.py` encrypts `[enc]` inputs on write via `crypto.encrypt()`
+(one Fernet key derived from `APP_FIELD_ENCRYPTION_KEY`), read schemas expose only
+`*_last4`, `redress_number` is never exposed, `crypto.decrypt()` has no caller, and
+audit snapshots pass through `crypto.redact()`. So §1.2.1 says "single static key
+at the API layer, placeholder in the seed, no KMS / per-tenant DEK / rotation /
+authorised decrypt path" rather than "no encryption", and lists what production
+adds. No code behaviour changed.
