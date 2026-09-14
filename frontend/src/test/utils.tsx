@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AuthProvider } from "@/lib/auth"
+import { ThemeProvider } from "@/lib/theme"
 import type { Me } from "@/lib/types"
 
 export const DEMO_ID = "867278a8-ba28-51cd-8240-1f48423fe086"
@@ -37,6 +38,7 @@ interface Options extends Omit<RenderOptions, "wrapper"> {
 export function renderWithProviders(ui: React.ReactElement, { route = "/", path = "*", user = BROKER, queryClient = makeTestQueryClient(), ...options }: Options = {}) {
   function Wrapper({ children }: { children: React.ReactNode }) {
     return (
+      <ThemeProvider defaultTheme="light">
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[route]}>
           <AuthProvider initialUser={user}>
@@ -49,6 +51,7 @@ export function renderWithProviders(ui: React.ReactElement, { route = "/", path 
           </AuthProvider>
         </MemoryRouter>
       </QueryClientProvider>
+      </ThemeProvider>
     )
   }
   return render(ui, { wrapper: Wrapper, ...options })

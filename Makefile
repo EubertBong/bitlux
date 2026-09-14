@@ -7,7 +7,7 @@ SHELL := /bin/bash
 PY := backend/.venv/bin/python
 export DATABASE_URL ?= postgresql+asyncpg://bitlux:bitlux@localhost:5433/bitlux_crm
 
-.PHONY: help venv test api web web-install web-test web-build screenshots up down wait migrate downgrade partition-maintenance seed verify-seed psql psql-app reset
+.PHONY: help venv test api web web-install web-test web-build screenshots verify-ui up down wait migrate downgrade partition-maintenance seed verify-seed psql psql-app reset
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
@@ -36,6 +36,9 @@ web-build: ## Production build to frontend/dist
 
 screenshots: ## Drive the running app with Chrome and write docs/screenshots/*.png
 	cd frontend && npm run screenshots
+
+verify-ui: ## Check sidebar scroll, layout gap, top bar and theme toggle in Chrome (app must be running)
+	cd frontend && npm run verify:ui
 
 up: ## Start postgres:16 (host port 5433)
 	docker compose up -d

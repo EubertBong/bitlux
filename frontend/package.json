@@ -11,7 +11,8 @@
     "lint": "eslint src",
     "test": "vitest run",
     "test:watch": "vitest",
-    "screenshots": "node e2e/screenshots.mjs"
+    "screenshots": "node e2e/screenshots.mjs",
+    "verify:ui": "node e2e/ui-polish.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.1.1",

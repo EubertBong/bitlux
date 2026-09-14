@@ -92,9 +92,9 @@ export function DashboardPage() {
                 <div className="h-48">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={agingData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                      <XAxis dataKey="bucket" fontSize={11} tickLine={false} axisLine={false} />
-                      <YAxis fontSize={11} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => `${Math.round(v / 1000)}k`} />
-                      <ChartTooltip formatter={(v) => money(Math.round(Number(v) * 100))} cursor={{ fill: "var(--accent)" }} />
+                      <XAxis dataKey="bucket" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)" }} />
+                      <YAxis fontSize={11} tickLine={false} axisLine={false} width={48} tick={{ fill: "var(--muted-foreground)" }} tickFormatter={(v: number) => `${Math.round(v / 1000)}k`} />
+                      <ChartTooltip formatter={(v) => money(Math.round(Number(v) * 100))} cursor={{ fill: "var(--accent)" }} contentStyle={{ background: "var(--popover)", color: "var(--popover-foreground)", border: "1px solid var(--border)", borderRadius: 8 }} />
                       <Bar dataKey="amount" fill="var(--primary)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>

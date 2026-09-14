@@ -25,6 +25,27 @@ export interface AuthContextValue {
 
 const AuthContext = React.createContext<AuthContextValue | null>(null)
 
+/** A boolean hint -- not a credential -- that this browser has signed in before, so the
+ * app can skip the silent refresh (and its 401) on a first visit. Cleared on sign-out. */
+const SESSION_HINT_KEY = "bitlux-session"
+const sessionHint = {
+  get: (): boolean => {
+    try {
+      return localStorage.getItem(SESSION_HINT_KEY) === "1"
+    } catch {
+      return false
+    }
+  },
+  set: (on: boolean): void => {
+    try {
+      if (on) localStorage.setItem(SESSION_HINT_KEY, "1")
+      else localStorage.removeItem(SESSION_HINT_KEY)
+    } catch {
+      /* ignore */
+    }
+  },
+}
+
 export function hasPermission(perms: ReadonlySet<string>, key: string): boolean {
   if (perms.has(key)) return true
   const resource = key.split(".")[0]
@@ -52,7 +73,7 @@ export function AuthProvider({ children, initialUser = null }: { children: React
     if (initialUser) return
     let cancelled = false
     ;(async () => {
-      const ok = tokenStore.get() ? true : await refreshAccessToken()
+      const ok = tokenStore.get() ? true : sessionHint.get() ? await refreshAccessToken() : false
       if (cancelled) return
       if (ok) await loadMe()
       else setStatus("anonymous")
@@ -75,6 +96,7 @@ export function AuthProvider({ children, initialUser = null }: { children: React
     async (email: string, password: string, clientSlug?: string) => {
       const pair = await api.post<TokenPair>("/auth/login", { email, password, client_slug: clientSlug ?? null })
       tokenStore.set(pair.access_token) // memory only; the refresh token arrived as an HttpOnly cookie
+      sessionHint.set(true)
       await loadMe()
     },
     [loadMe],
@@ -87,6 +109,7 @@ export function AuthProvider({ children, initialUser = null }: { children: React
       /* logout is idempotent server-side; local state is what matters */
     }
     tokenStore.clear()
+    sessionHint.set(false)
     setUser(null)
     setStatus("anonymous")
   }, [])

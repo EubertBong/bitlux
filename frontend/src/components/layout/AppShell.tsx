@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { GlobalSearch } from "@/components/GlobalSearch/GlobalSearch"
+import { ThemeToggle } from "@/components/layout/ThemeToggle"
 import { useAuth } from "@/lib/auth"
 import { initials, titleCase } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -90,16 +91,18 @@ export function AppShell() {
   const [sheetOpen, setSheetOpen] = React.useState(false)
 
   return (
-    <div className="flex h-full min-h-screen">
-      <aside className="hidden w-60 shrink-0 flex-col bg-sidebar lg:flex" data-testid="sidebar">
+    <div className="flex h-screen overflow-hidden bg-background">
+      <aside className="hidden h-screen w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex" data-testid="sidebar">
         <Brand />
-        <div className="flex-1 overflow-y-auto pb-6">
+        {/* Issue 1: the only scroller in the sidebar, with the hover-only thin scrollbar. */}
+        <div className="sidebar-scroll min-h-0 flex-1 pb-6" data-testid="sidebar-scroll">
           <NavList groups={groups} />
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur">
+      <div className="flex h-screen min-w-0 flex-1 flex-col">
+        {/* Issue 3: real vertical padding and a separator; not sticky any more because <main> is the scroller. */}
+        <header className="z-30 flex shrink-0 items-center gap-3 border-b bg-background/95 px-4 py-3 shadow-xs backdrop-blur sm:px-6" data-testid="topbar">
           <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open navigation">
@@ -111,18 +114,22 @@ export function AppShell() {
                 <SheetTitle className="sr-only">Navigation</SheetTitle>
                 <Brand />
               </SheetHeader>
-              <div className="overflow-y-auto pb-6">
+              <div className="sidebar-scroll min-h-0 flex-1 pb-6">
                 <NavList groups={groups} onNavigate={() => setSheetOpen(false)} />
               </div>
             </SheetContent>
           </Sheet>
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <GlobalSearch />
           </div>
-          <UserMenu />
+          <div className="flex shrink-0 items-center gap-1">
+            <ThemeToggle />
+            <UserMenu />
+          </div>
         </header>
 
-        <main className="flex-1 px-4 pt-6 pb-24 sm:px-6 lg:pb-8">
+        {/* Issue 2: main scrolls on its own; the sidebar background is never revealed. */}
+        <main className="min-h-0 flex-1 overflow-y-auto px-4 pt-6 pb-24 sm:px-6 lg:pb-8" data-testid="main">
           <Outlet />
         </main>
 

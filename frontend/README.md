@@ -19,6 +19,7 @@ Sign in with `owner@demo.test` / `Demo!2026` (also `broker@`, `ops@`).
 make web-test                 # tsc --noEmit, eslint, vitest
 make web-build                # frontend/dist
 make screenshots              # docs/screenshots/*.png via the system Chrome (app must be running)
+make verify-ui                # sidebar scroll / layout gap / top bar / theme checks in Chrome (app must be running)
 ```
 
 ## Environment
@@ -37,8 +38,20 @@ written to `localStorage`, `sessionStorage`, or a readable cookie. The refresh t
 never sees it. On a 401 the client calls `/auth/refresh` (cookie goes along with
 `credentials: "include"`), stores the new access token in memory and retries the original
 request **once**; concurrent 401s share one refresh. On page load the app performs a silent
-refresh, then `GET /auth/me`. Permissions come from `/auth/me`; `RequirePermission` and the
-sidebar use the same `can()`.
+refresh, then `GET /auth/me` — but only if the browser has signed in here before, which it
+remembers with a boolean `bitlux-session` flag in `localStorage` (set on login, cleared on
+logout). The flag is not a credential; it just avoids a guaranteed 401 on a first visit.
+Permissions come from `/auth/me`; `RequirePermission` and the sidebar use the same `can()`.
+
+## Theme
+
+Light / dark / system, chosen from the toggle next to the avatar and stored under
+`localStorage["bitlux-theme"]` (default `system`, which follows `prefers-color-scheme` live).
+`src/lib/theme.tsx` owns it: one `dark` class plus `color-scheme` on `<html>`, applied again
+inline in `index.html` before first paint so there is no flash. All colours are CSS variables
+in `src/index.css` (`:root` light, `.dark` dark, including the `sidebar-*` set) exposed to
+Tailwind through `@theme inline`; Tailwind 4's `@custom-variant dark` is the class-based dark
+mode. The sidebar's thin hover-only scrollbar is the `.sidebar-scroll` utility in the same file.
 
 ## Layout
 

@@ -152,13 +152,15 @@ are in **[backend/README.md](backend/README.md)**.
 make web-install && make web              # Vite dev server on http://localhost:5173 (API on :8000)
 make web-test                             # tsc + eslint + vitest
 make screenshots                          # docs/screenshots/*.png from the running app
+make verify-ui                            # layout / scrollbar / top bar / theme checks in Chrome
 ```
 
 Vite 6 / React 19 / TypeScript 5.9 / Tailwind 4, with React Router 7, TanStack
 Query + Table, shadcn-style components, react-hook-form + zod, D3 v7. The shell
 (sidebar, top bar with ⌘K search, mobile tab bar) is permission-gated from
 `/auth/me`; the access token lives in memory only and the refresh token in an
-HttpOnly cookie. `/clients` and `/clients/:id` are the fully implemented
+HttpOnly cookie. Light / dark / system theme, persisted as `bitlux-theme`.
+`/clients` and `/clients/:id` are the fully implemented
 reference pages; every other route is a skeleton for Sprint 5. The hero is the
 **relationship visualiser** — `<RelationshipGraph>` over `/graph/{entity}/{id}`,
 embedded as a "Relationship" tab on every entity detail page. Details in

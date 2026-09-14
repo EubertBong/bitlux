@@ -23,10 +23,19 @@
   --border: oklch(0.91 0.006 250);
   --input: oklch(0.91 0.006 250);
   --ring: oklch(0.6 0.08 262);
+  --destructive-foreground: oklch(0.985 0 0);
   --sidebar: oklch(0.2 0.03 262);
   --sidebar-foreground: oklch(0.93 0.01 250);
   --sidebar-muted: oklch(0.7 0.02 255);
+  --sidebar-primary: oklch(0.8 0.06 262);
+  --sidebar-primary-foreground: oklch(0.2 0.02 260);
   --sidebar-accent: oklch(0.28 0.04 262);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.6 0.08 262);
+  /* Scrollbar thumb for .sidebar-scroll: the sidebar's own foreground, mostly transparent. */
+  --sidebar-scrollbar: color-mix(in oklch, var(--sidebar-foreground) 28%, transparent);
+  color-scheme: light;
 }
 
 .dark {
@@ -48,6 +57,18 @@
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
   --ring: oklch(0.55 0.05 262);
+  --destructive-foreground: oklch(0.985 0 0);
+  --sidebar: oklch(0.13 0.012 262);
+  --sidebar-foreground: oklch(0.93 0.01 250);
+  --sidebar-muted: oklch(0.65 0.02 255);
+  --sidebar-primary: oklch(0.8 0.06 262);
+  --sidebar-primary-foreground: oklch(0.2 0.02 260);
+  --sidebar-accent: oklch(0.22 0.025 262);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.55 0.05 262);
+  --sidebar-scrollbar: color-mix(in oklch, var(--sidebar-foreground) 28%, transparent);
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -73,10 +94,16 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
 @layer base {
@@ -84,4 +111,30 @@
   body { @apply bg-background text-foreground; }
   /* Focus ring on SVG graph nodes must be visible for keyboard users. */
   svg [data-node]:focus-visible { outline: none; }
+}
+
+@layer utilities {
+  /* Thin, theme-matched scrollbar that only shows while the sidebar is hovered
+     (or holds focus). `scrollbar-gutter: stable` reserves the track width so
+     nav labels never sit under the thumb. The standard properties cover Chrome
+     121+ and Firefox; the -webkit- rules are the fallback for older WebKit,
+     scoped so they never fight the standard ones. */
+  .sidebar-scroll {
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 150ms ease;
+  }
+  .sidebar-scroll:hover,
+  .sidebar-scroll:focus-within {
+    scrollbar-color: var(--sidebar-scrollbar) transparent;
+  }
+  @supports not (scrollbar-color: auto) {
+    .sidebar-scroll::-webkit-scrollbar { width: 7px; }
+    .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+    .sidebar-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 9999px; }
+    .sidebar-scroll:hover::-webkit-scrollbar-thumb,
+    .sidebar-scroll:focus-within::-webkit-scrollbar-thumb { background: var(--sidebar-scrollbar); }
+  }
 }

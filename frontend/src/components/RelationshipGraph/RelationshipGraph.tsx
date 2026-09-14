@@ -325,7 +325,7 @@ export function RelationshipGraph({ entityType, entityId, initialDepth = 1, minH
                     onBlur={() => setFocusedId((f) => (f === n.id ? null : f))}
                   >
                     {(focused || n.isRoot) && <circle r={r + 5} fill="none" stroke={focused ? "var(--ring)" : nodeColor(n.type)} strokeWidth={focused ? 3 : 1.5} strokeDasharray={focused ? undefined : "3 3"} opacity={0.9} />}
-                    <circle r={r} fill={nodeColor(n.type)} stroke="white" strokeWidth={2} />
+                    <circle r={r} fill={nodeColor(n.type)} stroke="var(--card)" strokeWidth={2} />
                     <Icon x={-r * 0.55} y={-r * 0.55} width={r * 1.1} height={r * 1.1} color="white" strokeWidth={2} aria-hidden />
                     <text y={r + 13} textAnchor="middle" fontSize={11} className="fill-foreground pointer-events-none select-none" fontWeight={n.isRoot ? 600 : 400}>
                       {truncate(n.label)}

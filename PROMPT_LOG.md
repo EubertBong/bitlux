@@ -469,3 +469,79 @@ give-up path, error envelope; nav gating; formatters). `tsc --noEmit` and eslint
 (no `any`, no `@ts-ignore`) clean. Screenshots in `docs/screenshots/`: client
 Relationship tab at depth 1 and 2 (81 nodes / 117 edges at depth 2 on the demo
 client), ⌘K search for "gulf", client overview, dashboard.
+
+## 2026-09-14 — UI polish: sidebar scroll, layout gap, top bar, theme toggle
+
+**Prompt (abridged):** Four fixes, conservative, no redesign: (1) a thin, hover-only,
+theme-matched sidebar scrollbar as a reusable utility class; (2) no white gap under
+the sidebar when the main region scrolls; (3) real vertical padding and a separator
+on the top bar, search input a consistent height, avatar centred, same on mobile;
+(4) a light / dark / system theme toggle persisted under `bitlux-theme`, default
+`system`, one class on `<html>`, the full shadcn token set plus the sidebar tokens
+in both modes, graph legible in both. No layout, route, palette or component-API
+changes; no new dependency unless needed.
+
+**What changed and why:**
+
+- **Scrollbar** — `.sidebar-scroll` in `src/index.css` (`@layer utilities`). Standard
+  `scrollbar-width: thin` + `scrollbar-color`, transparent at rest and a 28%
+  sidebar-foreground thumb on `:hover` / `:focus-within`; `scrollbar-gutter: stable`
+  reserves the 10 px track so nav labels never sit under the thumb. The
+  `::-webkit-scrollbar` rules are only a fallback inside
+  `@supports not (scrollbar-color: auto)`, because Chrome 121+ ignores them once the
+  standard properties are set and having both fight each other is how you get an
+  always-visible bar.
+- **Gap** — the shell is now `h-screen overflow-hidden`; the sidebar is `h-screen
+  shrink-0` with the nav in the only sidebar scroller, and `<main>` is
+  `min-h-0 flex-1 overflow-y-auto`. The window no longer scrolls, so the sidebar
+  background always reaches the viewport bottom. The header dropped `sticky` because
+  it no longer needs it. The mobile sheet nav uses the same scroll utility; the bottom
+  tab bar was already `fixed` and is unaffected.
+- **Top bar** — `h-14` became `py-3` + `shadow-xs`, keeping the `border-b`; the
+  search trigger stays `h-9`, so the bar is 61 px tall with 12 px above and below the
+  input. Avatar/name sit in the same flex row and centre with it.
+- **Theme** — a 90-line `ThemeProvider` in `src/lib/theme.tsx` rather than
+  `next-themes`: the requirement is small (read/write one key, toggle one class,
+  follow `prefers-color-scheme` in system mode) and a dependency would have been the
+  heavier choice. `index.html` applies the same rule in an inline script before
+  first paint so there is no flash. `ThemeToggle` is the existing `DropdownMenu` +
+  ghost `Button` with sun / moon / monitor, an `aria-label` that states the current
+  mode, and a polite live region announcing changes. Sonner follows the resolved
+  theme. Tailwind 4 has no `darkMode` config: the `@custom-variant dark` already in
+  `index.css` is the v4 spelling of `darkMode: 'class'`.
+- **Tokens** — light values are untouched. Added the missing
+  `destructive-foreground`, `sidebar-primary(-foreground)`,
+  `sidebar-accent-foreground`, `sidebar-border`, `sidebar-ring`, and full dark
+  variants of every token including the sidebar set (the `.dark` block previously
+  defined none of them). `color-scheme` is set per mode so native controls and
+  scrollbars follow.
+- **Graph / charts** — node circles were stroked `white`; now `var(--card)`, so the
+  halo matches the card in dark mode. Labels, edges, arrowheads and the legend
+  already used theme variables. The dashboard chart axes and tooltip now read
+  `--muted-foreground` / `--popover`.
+- **Console errors** — two showed up in the check. The missing favicon is now an
+  inline SVG data URI. The other was the silent refresh on a browser that has never
+  signed in: Chrome logs the resulting 401 as a console error. `lib/auth.tsx` now
+  keeps a boolean `bitlux-session` hint in localStorage (set on login, cleared on
+  logout) and only attempts the silent refresh when it is present. It is a flag,
+  not a credential: the access token is still memory-only and the refresh token is
+  still an HttpOnly cookie.
+
+**Verification.** `npm run verify:ui` (`e2e/ui-polish.mjs`, also `make verify-ui`)
+drives the running app in Chrome and asserts each requirement from computed styles
+and DOM geometry — 23 checks, all passing: scrollbar thin/transparent at rest/themed
+on hover/labels clear of the track; `<main>` is the scroller and the sidebar bottom
+equals the viewport height on a long page at 1440×640 and on the 390-px mobile
+layout; top-bar padding, border, `h-9` input, avatar offset < 2 px; theme default →
+dark → reload → light → system with OS dark/light emulation → reload, each checking
+`localStorage["bitlux-theme"]`, the `dark` class and the button label; the graph card,
+label fill and edge stroke in dark mode; zero console errors across both themes.
+Screenshots: `docs/screenshots/polish-{sidebar-scrollbar,long-page-bottom,topbar,theme-light,theme-dark,mobile-bottom}.png`.
+`tsc --noEmit`, `eslint src` clean; 25 Vitest tests pass (4 new for the provider and
+toggle).
+
+**One test-environment finding.** Opening any Radix `DropdownMenu` under jsdom in
+this suite — the theme menu or a bare one with no theme code — leaves work pending
+that stalls the `afterEach` `act()` flush for ~15 s. The Vitest coverage therefore
+exercises `setTheme()` directly and the toggle's trigger state, and leaves the
+open/select/persist path to the Chrome script, where it is asserted for real.
