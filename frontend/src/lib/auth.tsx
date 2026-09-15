@@ -171,8 +171,12 @@ export function Forbidden({ permission }: { permission?: string }) {
 }
 
 /** Gate: renders children only if the current user has the permission. */
-export function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
+/**
+ * Gate children on a permission. Page routes leave `fallback` at its default (the
+ * Forbidden screen); action buttons pass `fallback={null}` so they simply do not render.
+ */
+export function RequirePermission({ permission, children, fallback }: { permission: string; children: React.ReactNode; fallback?: React.ReactNode }) {
   const { can } = useAuth()
-  if (!can(permission)) return <Forbidden permission={permission} />
+  if (!can(permission)) return <>{fallback === undefined ? <Forbidden permission={permission} /> : fallback}</>
   return <>{children}</>
 }

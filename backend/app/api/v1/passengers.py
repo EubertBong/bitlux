@@ -39,6 +39,7 @@ SPEC = ResourceSpec(
     permission_prefix="passengers",
     create_permission=None,
     encrypted_inputs=('known_traveler_number', 'redress_number'),
+    search_type="passengers",
 )
 
 # --- resource-specific routes (before install_crud) ---------------------------

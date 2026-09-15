@@ -63,21 +63,48 @@ export interface Segment extends Stamped {
   parent_segment_id: UUID | null
 }
 
+export type ContactStatus = "lead" | "prospect" | "active" | "dormant" | "churned" | "blocked"
+
 export interface Contact extends Stamped {
+  client_id?: UUID | null
   segment_id: UUID | null
   contact_type: "individual" | "company"
-  status: string
+  status: ContactStatus
+  salutation?: string | null
   first_name: string | null
+  middle_name?: string | null
   last_name: string | null
+  suffix?: string | null
   display_name: string
   company_name: string | null
   job_title: string | null
+  parent_contact_id?: UUID | null
+  referred_by_contact_id?: UUID | null
   owner_user_id: UUID | null
+  source?: string
   primary_email: string | null
   primary_phone: string | null
+  preferred_language?: string | null
   lifetime_value_cents: number
   trip_count: number
   last_activity_at: ISODate | null
+  do_not_contact?: boolean
+  vip_notes?: string | null
+  preferences?: Record<string, unknown>
+}
+
+export interface ContactChannel extends Stamped {
+  contact_id: UUID
+  channel_type: string
+  value: string
+  label: string | null
+  is_primary: boolean
+}
+
+export interface UserLookup {
+  id: UUID
+  full_name: string
+  role: UserRole
 }
 
 export interface Passenger extends Stamped {

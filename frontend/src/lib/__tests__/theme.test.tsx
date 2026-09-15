@@ -71,19 +71,17 @@ describe("theme", () => {
     expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 
-  // The menu itself is not opened here: any Radix DropdownMenu (theme-related or
-  // not) that is opened under jsdom in this suite leaves work pending that stalls
-  // the afterEach act() flush for ~15s. Selecting an item calls setTheme(), which
-  // is covered above; the open/select/persist path is exercised in a real browser
-  // by e2e/ui-polish.mjs.
-  it("ThemeToggle reflects the stored mode in its accessible label", () => {
-    mockPrefersDark(true)
-    const { unmount } = render(<ThemeProvider><ThemeToggle /></ThemeProvider>)
-    expect(screen.getByTestId("theme-toggle")).toHaveAttribute("aria-label", "Theme: System (dark). Change theme")
-    unmount()
-    localStorage.setItem(THEME_STORAGE_KEY, "light")
+  it("ThemeToggle switches via the menu and announces the change", async () => {
+    mockPrefersDark(false)
+    const user = userEvent.setup()
     render(<ThemeProvider><ThemeToggle /></ThemeProvider>)
-    expect(screen.getByTestId("theme-toggle")).toHaveAttribute("aria-label", "Theme: Light. Change theme")
-    expect(document.documentElement.classList.contains("dark")).toBe(false)
+    const btn = screen.getByTestId("theme-toggle")
+    expect(btn).toHaveAttribute("aria-label", "Theme: System (light). Change theme")
+    await user.click(btn)
+    await user.click(await screen.findByTestId("theme-dark"))
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark")
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
+    expect(screen.getByTestId("theme-toggle")).toHaveAttribute("aria-label", "Theme: Dark. Change theme")
+    expect(screen.getByRole("status")).toHaveTextContent("Theme set to Dark")
   })
 })

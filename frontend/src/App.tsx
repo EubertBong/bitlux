@@ -7,7 +7,14 @@ import { DashboardPage } from "@/pages/DashboardPage"
 import { ClientListPage } from "@/pages/clients/ClientListPage"
 import { ClientDetailPage } from "@/pages/clients/ClientDetailPage"
 import { NotFoundPage } from "@/pages/NotFoundPage"
+import { ContactListPage } from "@/pages/contacts/ContactListPage"
+import { ContactDetailPage } from "@/pages/contacts/ContactDetailPage"
+import { EntityFormPage } from "@/components/actions"
 import { RESOURCES, ResourceDetailPage, ResourceListPage } from "@/pages/resources"
+import "@/entities"
+
+/** Routes with a real implementation; the skeleton fallback below skips these. */
+const IMPLEMENTED = new Set(["contacts"])
 
 function gated(permission: string | null, element: React.ReactNode): React.ReactNode {
   return permission ? <RequirePermission permission={permission}>{element}</RequirePermission> : element
@@ -28,10 +35,14 @@ export function App() {
         <Route index element={<DashboardPage />} />
         <Route path="clients" element={gated("clients.view", <ClientListPage />)} />
         <Route path="clients/:id" element={gated("clients.view", <ClientDetailPage />)} />
-        {RESOURCES.map((r) => (
+        <Route path="contacts" element={gated("contacts.view", <ContactListPage />)} />
+        <Route path="contacts/new" element={gated("contacts.create", <EntityFormPage entity="contact" mode="create" />)} />
+        <Route path="contacts/:id" element={gated("contacts.view", <ContactDetailPage />)} />
+        <Route path="contacts/:id/edit" element={gated("contacts.edit", <EntityFormPage entity="contact" mode="edit" />)} />
+        {RESOURCES.filter((r) => !IMPLEMENTED.has(r.path)).map((r) => (
           <Route key={r.path} path={r.path} element={gated(r.permission, <ResourceListPage resource={r} />)} />
         ))}
-        {RESOURCES.filter((r) => r.detail).map((r) => (
+        {RESOURCES.filter((r) => r.detail && !IMPLEMENTED.has(r.path)).map((r) => (
           <Route key={`${r.path}/:id`} path={`${r.path}/:id`} element={gated(r.permission, <ResourceDetailPage resource={r} />)} />
         ))}
         <Route path="admin" element={<Navigate to="/admin/users" replace />} />

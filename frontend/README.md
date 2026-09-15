@@ -77,6 +77,23 @@ src/
 └── test/           vitest setup + render helpers
 ```
 
+## The actions layer
+
+`src/components/actions/` holds the CRUD primitives — `CreateButton`, `EditButton`,
+`DeleteButton`, `ActionMenu` (⋯ Edit / Duplicate / Archive / Delete), `ConfirmDialog`,
+`ResourceForm`, `EntityFormDialog`, `EntityFormPage` — and `useEntityActions.ts` holds the
+mutations behind them (success toast with the entity's name, cache refresh, Undo for soft
+delete via `POST /<resource>/<id>/restore`). They read one registry: each entity module in
+`src/entities/` registers its endpoint, route, permission prefix, name function, optional
+archive status and a form descriptor (Zod schema + field metadata + record↔payload
+mapping). Adding an entity is a module plus pages; the primitives do not change. Server
+422s land on the field they name; 403/404 are worded explicitly (`src/lib/errors.ts`).
+Contacts (`src/pages/contacts/`) is the reference implementation.
+
+**Testing note.** jsdom's selector engine `nwsapi` 2.2.27 makes every Radix menu open take
+~12 s; `package.json` pins it to 2.2.16 via `overrides`, which brings it to ~60 ms. Keep
+the override until jsdom ships a fixed version.
+
 ## The relationship graph
 
 `<RelationshipGraph entityType="client" entityId={id} />` fetches

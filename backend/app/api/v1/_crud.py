@@ -1,10 +1,11 @@
 """The standard six operations for every resource, built once.
 
-    GET    /{resource}                    list: page, page_size, order_by, ?<filter>=
+    GET    /{resource}                    list: page, page_size, order_by, ?<filter>=, ?q= (full text, when searchable)
     GET    /{resource}/{id}               get (soft-deleted -> 404)
     POST   /{resource}                    create   (<prefix>.create, or an override)
     PATCH  /{resource}/{id}               update   (<prefix>.edit)
     DELETE /{resource}/{id}               soft delete (<prefix>.delete)
+    POST   /{resource}/{id}/restore       undo a soft delete (<prefix>.delete)
     GET    /{resource}/{id}/relationships depth-1 neighbourhood (<prefix>.view)
 
 Every mutation appends an audit event (redacted) when the resource is an
@@ -23,6 +24,8 @@ from typing import Any, Callable, Optional, Type
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query, Request, Response, status
+from sqlalchemy import Float, column, func, literal
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from pydantic import BaseModel
 
 from app.deps import RequestContext, require_permission
@@ -31,6 +34,7 @@ from app.models.enums import AuditAction, EntityType
 from app.repositories import AuditEvent, AuditLogRepository, GraphResolver
 from app.repositories.base import MAX_PAGE_SIZE, BaseRepository
 from app.repositories.graph import GRAPH_TYPES
+from app.repositories.search import SEARCH_TYPES, _tsquery
 from app.schemas.common import GraphResponse
 from app.security.crypto import ENCRYPTED_FIELDS, encrypt, last4, redact
 
@@ -56,6 +60,8 @@ class ResourceSpec:
     create_permission: Optional[str] = None
     encrypted_inputs: tuple[str, ...] = ()
     orderable: tuple[str, ...] = field(default_factory=tuple)
+    #: Key into repositories.search.SEARCH_TYPES; enables ?q= on the list endpoint.
+    search_type: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.permission_prefix = self.permission_prefix or self.name
@@ -114,6 +120,25 @@ def to_repo_payload(spec: ResourceSpec, data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+_SEARCH_LIST_LIMIT = 1000
+
+
+def _search_criterion(spec: ResourceSpec, q: str):
+    """``model.id IN (SELECT id FROM search_ids(type, tsquery, N))`` -- the same
+    SECURITY DEFINER path /search uses (migration 017), so the GIN index is usable
+    under RLS; the outer statement is still under RLS and the live filter."""
+    if not spec.search_type or spec.search_type not in SEARCH_TYPES:
+        raise Unprocessable(f"'{spec.name}' is not searchable")
+    st = SEARCH_TYPES[spec.search_type]
+    hit = (
+        func.search_ids(literal(spec.search_type), _tsquery(q, st.config), literal(_SEARCH_LIST_LIMIT, sa.Integer))
+        .table_valued(column("id", PG_UUID(as_uuid=True)), column("rank", Float))
+        .render_derived()
+        .alias("hit")
+    )
+    return spec.model.id.in_(sa.select(hit.c.id))
+
+
 def _label(spec: ResourceSpec, obj: Any) -> Optional[str]:
     t = GRAPH_TYPES.get(spec.graph_type)
     try:
@@ -157,12 +182,14 @@ def install_crud(router: APIRouter, spec: ResourceSpec) -> None:
     delete = require_permission(spec.perm("delete"))
 
     @router.get("", response_model=ListOut, summary=f"List {spec.name}",
-                description=f"Filters (equality): {', '.join(spec.filters) or 'none'}. order_by accepts a column name, '-' prefix for descending.")
+                description=f"Filters (equality): {', '.join(spec.filters) or 'none'}. order_by accepts a column name, '-' prefix for descending."
+                            + (" q= runs full-text search (websearch syntax + prefix on the last word)." if spec.search_type else ""))
     async def list_items(
         request: Request,
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
         order_by: Optional[str] = Query(None, description="e.g. -created_at"),
+        q: Optional[str] = Query(None, description="Full-text search (searchable resources only)"),
         ctx: RequestContext = Depends(view),
     ):
         repo = spec.repo(ctx.session)
@@ -170,6 +197,7 @@ def install_crud(router: APIRouter, spec: ResourceSpec) -> None:
         for key in spec.filters:
             if key in request.query_params:
                 equals[key] = _coerce(spec.model, key, request.query_params[key])
+        criteria = [_search_criterion(spec, q)] if q and q.strip() else []
         ordering = None
         if order_by:
             col_name = order_by.lstrip("-")
@@ -177,8 +205,8 @@ def install_crud(router: APIRouter, spec: ResourceSpec) -> None:
                 raise Unprocessable(f"Cannot order by '{col_name}'")
             col = getattr(spec.model, col_name)
             ordering = (col.desc().nulls_last() if order_by.startswith("-") else col.asc().nulls_last(), spec.model.id)
-        items = await repo.list(page=page, page_size=page_size, order_by=ordering, **equals)
-        total = await repo.count(**equals)
+        items = await repo.list(*criteria, page=page, page_size=page_size, order_by=ordering, **equals)
+        total = await repo.count(*criteria, **equals)
         return ListOut(items=[Read.model_validate(i) for i in items], total=total, page=page, page_size=page_size)
 
     @router.get("/{item_id}", response_model=Read, summary=f"Get one of {spec.name}")
@@ -211,6 +239,13 @@ def install_crud(router: APIRouter, spec: ResourceSpec) -> None:
         obj = await spec.repo(ctx.session).soft_delete(item_id)
         await _audit(ctx, spec, AuditAction.SOFT_DELETE, obj, before=_snapshot(spec, obj))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @router.post("/{item_id}/restore", response_model=Read, summary=f"Restore a soft-deleted one of {spec.name}")
+    async def restore_item(item_id: uuid.UUID, ctx: RequestContext = Depends(delete)):
+        """Undo of DELETE. Same permission as delete; audited as `restore`."""
+        obj = await spec.repo(ctx.session).restore(item_id)
+        await _audit(ctx, spec, AuditAction.RESTORE, obj, after=_snapshot(spec, obj))
+        return Read.model_validate(obj)
 
     @router.get("/{item_id}/relationships", response_model=GraphResponse, summary=f"Neighbourhood of one of {spec.name}")
     async def relationships(item_id: uuid.UUID, ctx: RequestContext = Depends(view)):

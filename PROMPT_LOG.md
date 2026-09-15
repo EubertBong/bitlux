@@ -695,3 +695,70 @@ would have passed before the fix -- proves `SET LOCAL ROLE` works, checks
 idempotency (one membership row after two runs), and checks the printed URL uses
 `postgresql+asyncpg://`. Verified the original error and the new message by
 connecting as a temporary non-superuser owner without membership, then with it.
+
+## 2026-09-14 — Actions layer, phases 1–2: action primitives and Contacts CRUD
+
+**Prompt (abridged):** The app reads as a viewer. Build the "actions layer" in
+phases, stopping after each for review. Phase 1: reusable primitives in
+`components/actions/` (CreateButton, EditButton, DeleteButton, ActionMenu,
+ConfirmDialog, ResourceForm) — permission-gated via RequirePermission, success
+toasts with the entity name, cache refresh, field-level 422 mapping, explicit
+403/404 handling, Undo for soft delete, audit via the API. Phase 2: wire it onto
+Contacts as the reference (list with search/filters and a ⋯ menu, first-run empty
+state, detail with Edit/Delete and log call/email/meeting, `/contacts/new` and
+`/contacts/:id/edit`). Commit `feat: action primitives and Contacts CRUD`; show
+`/contacts` empty, list, create dialog, detail-with-edit.
+
+**Design.** One registry (`components/actions/registry.ts`): each entity module in
+`src/entities/` registers its endpoint, route, permission prefix, name function,
+optional archive status and a form descriptor (Zod schema + field metadata +
+record↔payload mapping). The primitives read the registry and never special-case
+an entity, so Phases 3–5 are entity modules plus pages. `ResourceForm` builds the
+form from the descriptor, validates with Zod, maps FastAPI's `["body", field]`
+422 locs onto the fields and toasts anything unmapped; `lib/errors.ts` words
+403 (permission or tenant boundary) and 404 explicitly and always shows the API's
+`code` and `message`. `RequirePermission` gained a `fallback` prop so buttons can
+use the same primitive as pages and simply not render. **Archive vs Delete**:
+the schema's one removal primitive is soft delete, so Delete = soft delete with a
+5-second Undo (a new `POST /{resource}/{id}/restore`, audited as `restore`);
+Archive follows the existing Clients convention and is a reversible status
+transition (`dormant` for contacts) — Phase 7's "bulk archive (soft delete)" will
+be reconciled with that when it comes.
+
+**Backend additions (all tested, 43 API+repo tests pass):** the restore endpoint;
+`?q=` on list endpoints for searchable resources, routed through the same
+`search_ids()` SECURITY DEFINER path as `/search` so the GIN index is usable under
+RLS and equality filters combine with it; `GET /admin/users/lookup` (id, name,
+role of active colleagues) for owner/assignee pickers without `users.view`, which
+would expose emails.
+
+**Choices the brief left open.** "New Contact" is gated on `contacts.create`, the
+permission the API enforces, not `contacts.edit`. The detail tabs are Overview |
+Passengers | Documents | Activities | Relationship: "Application" in the brief had
+no referent in the model, so the contact's linked passengers took the slot — easy
+to rename. Segment and owner pickers hide themselves for roles that cannot list
+the source. "Add passenger" on the contact header waits for Phase 3's entity.
+
+**The Radix test stall, solved.** Opening any Radix DropdownMenu under jsdom took
+~12 s (the earlier theme sprint worked around it). A CPU profile put the time in
+jsdom's selector engine: `nwsapi` 2.2.27's `:fullscreen`/`:modal` pseudo-class
+matching. Pinning `nwsapi` to 2.2.16 via package.json `overrides` brings a menu
+open to ~60 ms, so menu-driven flows are now testable; the theme-toggle test
+exercises the real menu again.
+
+**A bug the tests caught.** Passing the loaded record through react-hook-form's
+`values` prop reset the text inputs but left Controller-driven selects empty, so
+editing a contact whose status was not the default could not be saved. The forms
+are now keyed on the record and take it as `defaultValues`; the walkthrough
+asserts the edit dialog shows a `prospect` contact's status and owner.
+
+**Verification.** tsc, eslint, 35 Vitest tests (10 new: rows, first-run empty
+state, q= + filters, create with derived display_name and toast, Zod then server
+422 on the right fields, ⋯ Delete → confirm → DELETE + Undo toast, ⋯ Edit →
+PATCH, detail header + tabs + Delete, log call → POST /activities bound to the
+contact and user, read-only role sees no actions). `e2e/contacts-shots.mjs`
+against the live app: empty state (list request stubbed), real list, q= search,
+row-menu Edit showing a non-default status, create (201, toast, list refresh),
+log call (201, appears), edit page (PATCH 200), delete (204) → Undo (restore 200)
+→ row back, row-menu delete, no console errors. Screenshots:
+`docs/screenshots/contacts-{empty,list,create,detail-edit}.png`.

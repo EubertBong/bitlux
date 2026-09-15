@@ -6,9 +6,10 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from app.api.v1._crud import ResourceSpec, install_crud
-from app.deps import RequestContext, require_permission
+from app.deps import RequestContext, get_context, require_permission
 from app.models import User
 from app.models.enums import AuditAction, EntityType
 from app.repositories import AuditLogRepository, UserRepository
@@ -30,6 +31,22 @@ class _UserUpdate(UserUpdate):
 
 
 users_router = APIRouter(prefix="/users")  # mounted under /admin below -> /admin/users
+
+
+class UserLookup(BaseModel):
+    id: uuid.UUID
+    full_name: str
+    role: str
+
+
+@users_router.get("/lookup", response_model=list[UserLookup], summary="Active colleagues (id + name) for owner/assignee pickers")
+async def users_lookup(ctx: RequestContext = Depends(get_context)) -> list[UserLookup]:
+    """Any authenticated user may see who else is in their tenant by name -- it is
+    what every owner / assignee dropdown needs -- without users.view, which
+    exposes emails, roles and status changes. Registered before install_crud so
+    the literal path wins over /{item_id}."""
+    rows = await UserRepository(ctx.session).list(page_size=MAX_PAGE_SIZE, status="active", order_by=(User.full_name,))
+    return [UserLookup(id=u.id, full_name=u.full_name, role=u.role.value if hasattr(u.role, "value") else str(u.role)) for u in rows]
 
 
 def _hash_password_in(payload_cls):

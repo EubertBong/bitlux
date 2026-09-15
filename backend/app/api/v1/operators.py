@@ -38,6 +38,7 @@ SPEC = ResourceSpec(
     permission_prefix="operators",
     create_permission=None,
     encrypted_inputs=(),
+    search_type="operators",
 )
 
 # --- resource-specific routes (before install_crud) ---------------------------

@@ -37,6 +37,7 @@ SPEC = ResourceSpec(
     permission_prefix="quotes",
     create_permission=None,
     encrypted_inputs=(),
+    search_type="quotes",
 )
 
 # --- resource-specific routes (before install_crud) ---------------------------

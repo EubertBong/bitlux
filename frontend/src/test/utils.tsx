@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { AuthProvider } from "@/lib/auth"
 import { ThemeProvider } from "@/lib/theme"
 import type { Me } from "@/lib/types"
+import "@/entities"
 
 export const DEMO_ID = "867278a8-ba28-51cd-8240-1f48423fe086"
 
@@ -18,8 +19,16 @@ export const BROKER: Me = {
   status: "active",
   timezone: "America/New_York",
   permissions: [
-    "clients.view", "clients.create", "clients.edit", "contacts.view", "contacts.create", "passengers.view", "trips.view",
-    "quotes.view", "bookings.view", "documents.view", "tasks.view", "activities.view", "empty_legs.view", "segments.view", "account_holders.view",
+    // What the real broker role grants (permissions.py): clients.*, contacts.*, passengers.*, trips.*, quotes.*,
+    // bookings.*, tasks.*, activities.*, documents.view/upload, empty_legs.view -- plus segments/account holders view for the pages.
+    "clients.view", "clients.create", "clients.edit",
+    "contacts.view", "contacts.create", "contacts.edit", "contacts.delete",
+    "passengers.view", "passengers.create", "passengers.edit", "passengers.delete",
+    "trips.view", "trips.create", "trips.edit", "trips.delete",
+    "quotes.view", "quotes.create", "quotes.edit", "bookings.view", "bookings.create", "bookings.edit",
+    "tasks.view", "tasks.create", "tasks.edit", "tasks.delete",
+    "activities.view", "activities.create", "activities.edit", "activities.delete",
+    "documents.view", "documents.upload", "empty_legs.view", "segments.view", "account_holders.view",
   ],
 }
 

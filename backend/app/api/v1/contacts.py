@@ -39,6 +39,7 @@ SPEC = ResourceSpec(
     permission_prefix="contacts",
     create_permission=None,
     encrypted_inputs=(),
+    search_type="contacts",
 )
 
 # --- resource-specific routes (before install_crud) ---------------------------

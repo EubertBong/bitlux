@@ -35,6 +35,7 @@ SPEC = ResourceSpec(
     permission_prefix="aircraft",
     create_permission=None,
     encrypted_inputs=(),
+    search_type="aircraft",
 )
 
 # --- resource-specific routes (before install_crud) ---------------------------
