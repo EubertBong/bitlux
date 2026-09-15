@@ -34,7 +34,8 @@ tells you which kind of role a URL is. Never give Render the owner URL.
   `postgresql://<user>:<pw>@<endpoint>.neon.tech/bitlux_crm?sslmode=require`.
   A trailing `&channel_binding=require` is fine; the app and scripts strip it.
 - Render and Cloudflare accounts linked to the GitHub account that owns this repo.
-- Locally: `make venv` has been run (the `*-prod` targets use `backend/.venv`),
+- Locally: `make venv` has been run (the `*-prod` targets use `backend/.venv`), `psql` is
+  installed (`make db-check-prod` uses it),
   and the code is pushed to GitHub (`master`).
 
 ## Step 0. Prepare the database (from your machine)
@@ -42,13 +43,13 @@ tells you which kind of role a URL is. Never give Render the owner URL.
 ```bash
 export DATABASE_URL='postgresql://<owner>:<pw>@<endpoint>.neon.tech/bitlux_crm?sslmode=require'
 
-make db-check-prod              # OK ... bitlux_app: missing
+make db-check-prod              # SELECT 1: OK ... bitlux_app: MISSING
 export APP_DB_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 make app-role-prod              # creates bitlux_app; PRINTS the APP_DATABASE_URL for Render -- copy it
 make migrate-prod               # alembic upgrade head (001 .. 017)
 make partition-maintenance-prod # 12 months of audit_logs partitions
 make seed-prod                  # optional demo tenant; 5-second Ctrl-C window
-make db-check-prod              # alembic: 017, bitlux_app: login=True bypassrls=False
+make db-check-prod              # bitlux_app: exists, login=true, bypassrls=false; alembic head: 017
 ```
 
 Every `*-prod` target refuses to run if `DATABASE_URL` is unset or points at

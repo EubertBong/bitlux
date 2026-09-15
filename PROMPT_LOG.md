@@ -630,3 +630,42 @@ audit snapshots pass through `crypto.redact()`. So §1.2.1 says "single static k
 at the API layer, placeholder in the seed, no KMS / per-tenant DEK / rotation /
 authorised decrypt path" rather than "no encryption", and lists what production
 adds. No code behaviour changed.
+
+## 2026-09-14 — backend/Makefile: production targets referenced by DEPLOY.md
+
+**Prompt (abridged):** Add `db-check-prod`, `app-role-prod`, `migrate-prod`,
+`seed-prod`, `partition-maintenance-prod` to `backend/Makefile` with a shared guard
+(refuse unset / localhost `DATABASE_URL`, echo target + redacted url, use `.venv`),
+psql-based `db-check-prod`, an idempotent role target that grants DML on all tables,
+and verify `make venv / test / migrate / seed` still work.
+
+**Premise corrections.** There was no `backend/Makefile`; the targets already existed
+in the root Makefile from Sprint 5A. Rather than keep two copies, `backend/Makefile`
+now owns every backend/database target (local and `*-prod`) and the root Makefile
+delegates to it (`make X` == `make -C backend X`), so the runbook's root-level
+commands still work and each recipe exists once. The requested blanket
+`GRANT SELECT/INSERT/UPDATE/DELETE ON ALL TABLES` was **not** implemented: migration
+015 asserts `bitlux_app` holds no UPDATE/DELETE on `audit_logs` (append-only), and
+per-table DML is granted deliberately by each migration via `grant_app_dml()`.
+`app-role-prod` grants CONNECT, schema USAGE and the read+append default
+privileges — identical to `docker/initdb/10-app-role.sql` — and leaves DML to the
+migrations. `db-check-prod` moved to pure `psql` (SELECT 1, server, role kind,
+`bitlux_app` exists/LOGIN/BYPASSRLS/superuser, alembic head), so
+`scripts/db_check.py` was removed; `psql` is now a documented prerequisite.
+Redaction keeps the username (`user:****@host`) rather than the brief's
+`s/:[^@]*@/:****@/`, which also swallowed the scheme's `//user`.
+
+**Found while verifying.** `uv venv` (0.12) refuses to replace an existing `.venv`
+without `--clear`, so `make venv` could never rebuild in place; fixed. The venv had
+in fact been rebuilt without the editable project install by the previous sprint's
+lock check, which is why the first `seed-prod` run failed on `import app`;
+`make venv` restored it (now on uv's Python 3.12).
+
+**Verified.** Guards: empty, unset (falls to the local default), explicit
+`127.0.0.1`, from root and from `backend/`. Prod recipes exercised for real against
+the compose container's bridge address (not localhost, so the guard passes):
+`db-check-prod` as owner (RLS BYPASSED, head 017) and as `bitlux_app` (RLS enforced),
+`app-role-prod` without password (refused) and with (role updated, URL printed,
+dev password restored afterwards), `migrate-prod`, `partition-maintenance-prod`,
+`seed-prod` with countdown. Local: `make venv`, `migrate`, `partition-maintenance`,
+`seed`, `verify-seed` (ALL PASS), `test` (35 passed) from root and standalone.
