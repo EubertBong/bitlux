@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Link, NavLink, Outlet, useNavigate } from "react-router"
-import { LogOut, Menu, Plane } from "lucide-react"
+import { LogOut, Menu, Plane, Shield, UserRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -56,7 +56,7 @@ function Brand() {
 }
 
 function UserMenu() {
-  const { user, logout } = useAuth()
+  const { user, logout, can } = useAuth()
   const navigate = useNavigate()
   if (!user) return null
   return (
@@ -76,7 +76,16 @@ function UserMenu() {
           <div className="mt-1 text-xs text-muted-foreground">Role: {titleCase(user.role)}</div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void logout().then(() => navigate("/login"))}>
+        <DropdownMenuItem onSelect={() => navigate("/settings/profile")} data-testid="menu-profile">
+          <UserRound /> Profile
+        </DropdownMenuItem>
+        {can("users.view") && (
+          <DropdownMenuItem onSelect={() => navigate("/admin/users")} data-testid="menu-admin">
+            <Shield /> Admin
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => void logout().then(() => navigate("/login"))} data-testid="menu-signout">
           <LogOut /> Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>

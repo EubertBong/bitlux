@@ -79,6 +79,16 @@ export const RESOURCES: ResourceSpec[] = [
   { path: "admin/audit-log", endpoint: "/admin/audit-log", title: "Audit log", permission: "audit.view", columns: ["occurred_at", "action", "entity_type", "entity_label", "actor_label"], labelField: "entity_label", entity: "audit_log" },
 ]
 
+/**
+ * Dashboard tiles deep-link into a list with a named view, e.g. /documents?expiring=30
+ * and /tasks?assigned=me. Each maps to an endpoint the API already exposes; the list
+ * shows a removable chip so the narrowing is never invisible.
+ */
+const VIEWS: Record<string, { param: string; label: (v: string) => string; endpoint: (v: string) => string }> = {
+  documents: { param: "expiring", label: (v) => `Expiring within ${v} days`, endpoint: (v) => `/documents/expiring${qs({ days: Number(v) || 30 })}` },
+  tasks: { param: "assigned", label: () => "Assigned to me", endpoint: () => "/tasks/my-queue" },
+}
+
 /** Resources whose list endpoint accepts ?q= (see backend ResourceSpec.search_type). */
 const SEARCHABLE = new Set(["contacts", "passengers", "operators", "aircraft", "trips", "quotes", "airports", "documents", "manufacturers", "aircraft-models"])
 const PAGE_SIZE = 25
@@ -153,6 +163,8 @@ function GenericListPage({ resource }: { resource: ResourceSpec }) {
   const urlQ = params.get("q") ?? ""
   const [qInput, setQInput] = React.useState(urlQ)
   const searchable = SEARCHABLE.has(resource.path)
+  const viewSpec = VIEWS[resource.path]
+  const viewValue = viewSpec ? params.get(viewSpec.param) : null
   const [visibility, setVisibility] = React.useState<VisibilityState>({})
   const [selection, setSelection] = React.useState<RowSelectionState>({})
 
@@ -173,13 +185,18 @@ function GenericListPage({ resource }: { resource: ResourceSpec }) {
   }, [qInput, urlQ, update])
 
   const query = useQuery({
-    queryKey: [resource.endpoint, "list", { page, orderBy, status, q: urlQ }],
-    queryFn: () => api.get<Page<AnyRecord> | AnyRecord[]>(`${resource.endpoint}${qs({ page, page_size: PAGE_SIZE, order_by: orderBy || null, q: searchable && urlQ ? urlQ : null, status: status === ALL ? null : status })}`),
+    queryKey: [resource.endpoint, "list", { page, orderBy, status, q: urlQ, view: viewValue }],
+    queryFn: () =>
+      api.get<Page<AnyRecord> | AnyRecord[]>(
+        viewValue && viewSpec
+          ? viewSpec.endpoint(viewValue)
+          : `${resource.endpoint}${qs({ page, page_size: PAGE_SIZE, order_by: orderBy || null, q: searchable && urlQ ? urlQ : null, status: status === ALL ? null : status })}`,
+      ),
     placeholderData: (prev) => prev,
   })
   const items: AnyRow[] = React.useMemo(() => (isPage(query.data) ? query.data.items : Array.isArray(query.data) ? query.data : []) as AnyRow[], [query.data])
   const total = isPage(query.data) ? query.data.total : items.length
-  const hasFilters = Boolean(urlQ) || status !== ALL
+  const hasFilters = Boolean(urlQ) || status !== ALL || Boolean(viewValue)
 
   const sorting: SortingState = React.useMemo(() => (orderBy ? [{ id: orderBy.replace(/^-/, ""), desc: orderBy.startsWith("-") }] : []), [orderBy])
   const columns = React.useMemo<ColumnDef<AnyRow, unknown>[]>(() => {
@@ -232,6 +249,7 @@ function GenericListPage({ resource }: { resource: ResourceSpec }) {
           )}
           {urlQ && <Badge variant="secondary" className="gap-1">“{urlQ}” <button type="button" aria-label="Clear search" onClick={() => setQInput("")}><X className="size-3" /></button></Badge>}
           {status !== ALL && <Badge variant="secondary" className="gap-1">{titleCase(status)} <button type="button" aria-label="Clear status filter" onClick={() => update({ status: null })}><X className="size-3" /></button></Badge>}
+          {viewValue && viewSpec && <Badge variant="secondary" className="gap-1" data-testid="view-chip">{viewSpec.label(viewValue)} <button type="button" aria-label="Clear view" onClick={() => update({ [viewSpec.param]: null })}><X className="size-3" /></button></Badge>}
         </div>
       </PageHeader>
 
@@ -386,7 +404,7 @@ export function ResourceDetailPage({ resource }: { resource: ResourceSpec }) {
   const query = useQuery({ queryKey: [cfg?.queryKey ?? resource.endpoint, id], queryFn: () => api.get<AnyRow>(`${resource.endpoint}/${id}`), enabled: id.length > 0 })
 
   if (query.isPending) return <div><PageHeader title={resource.title} /><LoadingState /></div>
-  if (query.isError) return <div><BackLink to={`/${resource.path}`} /><PageHeader title={resource.title} /><ErrorState error={query.error} onRetry={() => void query.refetch()} /></div>
+  if (query.isError) return <div><BackLink to={`/${resource.path}`} label={resource.title} /><PageHeader title={resource.title} /><ErrorState error={query.error} onRetry={() => void query.refetch()} /></div>
   const row = query.data
   const name = cfg ? cfg.nameOf(row) : String(row[resource.labelField] ?? resource.title)
   const currency = String(row.currency ?? "USD")
@@ -408,7 +426,7 @@ export function ResourceDetailPage({ resource }: { resource: ResourceSpec }) {
         }
       />
       {resource.graphType ? (
-        <Tabs value={tab} onValueChange={(v) => setParams(v === "overview" ? {} : { tab: v })}>
+        <Tabs value={tab} onValueChange={(v) => setParams((prev) => { const next = new URLSearchParams(prev); if (v === "overview") next.delete("tab"); else next.set("tab", v); return next }, { replace: true })}>
           <TabsList aria-label={`${resource.title} sections`}>
             <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
             <TabsTrigger value="relationship" data-testid="tab-relationship">Relationship</TabsTrigger>

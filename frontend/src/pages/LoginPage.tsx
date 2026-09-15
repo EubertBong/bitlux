@@ -52,7 +52,7 @@ export function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <span className="mb-2 flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Plane className="size-5" aria-hidden /></span>
-          <CardTitle className="text-xl">Sign in to Bitlux CRM</CardTitle>
+          <CardTitle asChild className="text-xl"><h1>Sign in to Bitlux CRM</h1></CardTitle>
           <CardDescription>Use your brokerage account</CardDescription>
         </CardHeader>
         <CardContent>

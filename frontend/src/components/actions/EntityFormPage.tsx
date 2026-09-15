@@ -17,7 +17,8 @@ export function EntityFormPage({ entity, mode }: { entity: string; mode: "create
   const record = useEntityRecord<{ id: string }>(entity, mode === "edit" ? id : undefined)
   const create = useCreateEntity<{ id: string }>(entity)
   const update = useUpdateEntity<{ id: string }>(entity)
-  const back = () => (window.history.length > 1 ? navigate(-1) : navigate(cfg.path))
+  // Explicit, not history.back(): /contacts/new opened from a deep link has no history.
+  const back = () => navigate(mode === "edit" && id ? `${cfg.path}/${id}` : cfg.path)
   const permission = `${cfg.permissionPrefix}.${mode === "edit" ? "edit" : "create"}`
 
   const onSubmit = async (v: Record<string, unknown>) => {

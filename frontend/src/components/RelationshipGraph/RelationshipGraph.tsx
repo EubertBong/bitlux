@@ -15,13 +15,14 @@
  */
 
 import * as React from "react"
-import { useNavigate } from "react-router"
+import { Link, useNavigate } from "react-router"
 import { drag as d3drag, type D3DragEvent } from "d3-drag"
 import { select } from "d3-selection"
 import "d3-transition" // augments Selection with .transition()
 import { zoom as d3zoom, zoomIdentity, type D3ZoomEvent, type ZoomBehavior, type ZoomTransform } from "d3-zoom"
-import { RefreshCw } from "lucide-react"
+import { Network, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { listEntities } from "@/components/actions/registry"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError } from "@/lib/api"
 import { titleCase } from "@/lib/format"
@@ -251,6 +252,33 @@ export function RelationshipGraph({ entityType, entityId, initialDepth = 1, minH
   const edges = prepared?.edges ?? []
   const hoveredPos = hovered ? transform.apply([hovered.x ?? 0, hovered.y ?? 0]) : null
 
+  // Nothing to draw: say so, and offer the way back rather than an empty canvas.
+  if (nodes.length === 0) {
+    // Pluralising a type name by hand gets "aircrafts" and "crew-members" wrong;
+    // the entity registry already knows each type's list route.
+    const listRoute = listEntities().find((e) => e.graphType === entityType)?.path ?? null
+    const everythingHidden = (prepared?.hiddenCount ?? 0) > 0
+    return (
+      <div className={cn("flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed text-center", className)} style={{ minHeight }} data-testid="graph-empty">
+        <Network className="size-8 text-muted-foreground" aria-hidden />
+        <p className="font-medium">{everythingHidden ? "Every node is hidden by the type filter" : "No connections yet"}</p>
+        <p className="max-w-md text-sm text-muted-foreground">
+          {everythingHidden
+            ? `${prepared?.hiddenCount} node${prepared?.hiddenCount === 1 ? "" : "s"} are filtered out. Show them again to see the graph.`
+            : `This ${titleCase(entityType).toLowerCase()} has nothing linked to it yet. Connections appear here as you add trips, quotes, documents and people.`}
+        </p>
+        <div className="flex gap-2">
+          {everythingHidden ? (
+            <Button variant="outline" onClick={() => setHiddenTypes(new Set())}>Show all types</Button>
+          ) : listRoute ? (
+            <Button variant="outline" asChild data-testid="graph-empty-back"><Link to={listRoute}>Back to {titleCase(entityType).toLowerCase()} list</Link></Button>
+          ) : null}
+          <Button variant="outline" onClick={() => void query.refetch()} data-testid="graph-empty-retry"><RefreshCw /> Refresh</Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={cn("flex w-full flex-col gap-3", className)} data-testid="relationship-graph">
       <GraphControls
@@ -289,7 +317,7 @@ export function RelationshipGraph({ entityType, entityId, initialDepth = 1, minH
           <g ref={layerRef} transform={transform.toString()}>
             <g className="edges">
               {edges.map((e) => (
-                <EdgeLine key={e.key} edge={e} emphasised={hovered !== null && (e.source.id === hovered.id || e.target.id === hovered.id)} />
+                <EdgeLine key={e.key} edge={e} emphasised={hovered !== null && (e.source.id === hovered.id || e.target.id === hovered.id)} onSelect={() => go(e.target)} />
               ))}
             </g>
             <g className="edge-labels">
@@ -343,7 +371,11 @@ export function RelationshipGraph({ entityType, entityId, initialDepth = 1, minH
   )
 }
 
-function EdgeLine({ edge, emphasised }: { edge: SimEdge; emphasised: boolean }) {
+/**
+ * An edge is a link to what it points at. The visible hairline stays 1.4px; a
+ * transparent 12px line on top gives it a usable hit area.
+ */
+function EdgeLine({ edge, emphasised, onSelect }: { edge: SimEdge; emphasised: boolean; onSelect: () => void }) {
   const sx = edge.source.x ?? 0
   const sy = edge.source.y ?? 0
   const tx = edge.target.x ?? 0
@@ -356,18 +388,22 @@ function EdgeLine({ edge, emphasised }: { edge: SimEdge; emphasised: boolean }) 
   const ex = tx - (dx / len) * rT
   const ey = ty - (dy / len) * rT
   return (
-    <line
-      x1={sx}
-      y1={sy}
-      x2={ex}
-      y2={ey}
-      data-edge={edge.key}
-      data-edge-type={edge.type}
-      stroke={emphasised ? "var(--foreground)" : "var(--border)"}
-      strokeOpacity={emphasised ? 0.9 : 1}
-      strokeWidth={emphasised ? 2 : 1.4}
-      markerEnd="url(#rg-arrow)"
-    />
+    <g role="button" tabIndex={0} aria-label={`${edge.source.label} ${edge.label ?? edge.type} ${edge.target.label}. Press Enter to open ${edge.target.label}.`} data-edge-clickable={edge.key} onClick={onSelect} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }} className="outline-none focus-visible:[&>line:first-child]:stroke-[var(--ring)]">
+      <line x1={sx} y1={sy} x2={ex} y2={ey} stroke="transparent" strokeWidth={12} strokeLinecap="round" />
+      <line
+        x1={sx}
+        y1={sy}
+        x2={ex}
+        y2={ey}
+        data-edge={edge.key}
+        data-edge-type={edge.type}
+        stroke={emphasised ? "var(--foreground)" : "var(--border)"}
+        strokeOpacity={emphasised ? 0.9 : 1}
+        strokeWidth={emphasised ? 2 : 1.4}
+        markerEnd="url(#rg-arrow)"
+        pointerEvents="none"
+      />
+    </g>
   )
 }
 

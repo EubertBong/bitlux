@@ -198,6 +198,12 @@ make docker-build docker-run       # the Render image, locally, against docker-c
 
 ## Known limitations (test project)
 
+- **No breadcrumbs.** Detail pages carry an explicit "← Back to <list>" link rather
+  than a full `Home > Clients > … > John Smith` trail. The trail needs each
+  intermediate record's name resolved per route, which is a bigger change than the
+  affordance it buys; the back link covers the actual need (getting out of a detail
+  page reached by a deep link).
+
 - **`[enc]` columns use a placeholder in the demo seed; production requires a
   KMS-backed key hierarchy.** The API itself encrypts passport numbers, KTNs,
   redress numbers, tax IDs and crew licence numbers on write with a single Fernet

@@ -1,0 +1,60 @@
+/**
+ * Affordances for interactive elements.
+ *
+ * Plain CSS on purpose: no Tailwind directives, so the file can be loaded
+ * verbatim by src/test/cursor.test.tsx and asserted against the real rules
+ * rather than a copy of them.
+ *
+ * Every rule here pairs a cursor with a visible hover state -- a hand cursor
+ * with no hover feedback still leaves people guessing.
+ */
+
+button,
+[role="button"],
+a[href],
+[role="link"],
+summary,
+label[for],
+[data-clickable] {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"],
+[data-disabled] {
+  cursor: not-allowed;
+}
+
+/* A row whose whole area navigates. Cells still hold the real link. */
+tr[data-clickable] {
+  cursor: pointer;
+}
+
+/* Cards that navigate: lift on hover, and keep the keyboard focus ring. */
+a[data-clickable-card] {
+  display: block;
+  border-radius: var(--radius);
+  transition: box-shadow 150ms ease, transform 150ms ease;
+}
+a[data-clickable-card]:hover {
+  box-shadow: 0 4px 16px -4px rgb(0 0 0 / 18%);
+  transform: translateY(-1px);
+}
+a[data-clickable-card]:hover [data-slot="card"] {
+  border-color: var(--ring);
+}
+a[data-clickable-card]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* SVG graph: nodes and clickable edges. */
+svg [data-node],
+svg [data-edge-clickable] {
+  cursor: pointer;
+}
+
+/* The current breadcrumb segment and other non-links must not look clickable. */
+[aria-current="page"]:not(a):not(button) {
+  cursor: default;
+}

@@ -5,26 +5,37 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { PageHeader } from "@/components/common/PageHeader"
 import { EmptyState, ErrorState, LoadingState } from "@/components/common/States"
+import { ArrowUpRight } from "lucide-react"
 import { api, qs } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { ago, fmtDate, money, titleCase } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import type { Activity, AgingReport, Page, Task, Trip } from "@/lib/types"
 
-function Kpi({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
-  return (
-    <Card className="gap-1 py-4">
-      <CardHeader className="px-4"><CardDescription>{label}</CardDescription></CardHeader>
+/**
+ * A KPI tile. With `to` the whole card is one link (hand cursor and a lift on
+ * hover come from styles/interactive.css); without, it is a plain card.
+ */
+function Kpi({ label, value, hint, to }: { label: string; value: React.ReactNode; hint?: string; to?: string }) {
+  const card = (
+    <Card className={cn("gap-1 py-4", to && "h-full")} data-testid="kpi">
+      <CardHeader className="px-4"><CardDescription className="flex items-center gap-1">{label}{to && <ArrowUpRight className="size-3.5 opacity-0 transition-opacity group-hover:opacity-70" aria-hidden />}</CardDescription></CardHeader>
       <CardContent className="px-4">
         <div className="text-2xl font-semibold tabular-nums">{value}</div>
         {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
       </CardContent>
     </Card>
   )
+  if (!to) return card
+  return <Link to={to} data-clickable-card="" className="group" aria-label={`${label}: open`}>{card}</Link>
 }
 
 export function DashboardPage() {
   const { user, can } = useAuth()
+  const clients = useQuery({ queryKey: ["clients", "count"], queryFn: () => api.get<Page<unknown>>(`/clients${qs({ page_size: 1, status: "active" })}`), enabled: can("clients.view") })
   const contacts = useQuery({ queryKey: ["contacts", "count"], queryFn: () => api.get<Page<unknown>>(`/contacts${qs({ page_size: 1 })}`), enabled: can("contacts.view") })
+  const emptyLegs = useQuery({ queryKey: ["empty_legs", "available"], queryFn: () => api.get<Page<unknown>>(`/empty_legs${qs({ page_size: 1, status: "available" })}`), enabled: can("empty_legs.view") })
+  const expiring = useQuery({ queryKey: ["documents", "expiring", 30], queryFn: () => api.get<unknown[]>(`/documents/expiring${qs({ days: 30 })}`), enabled: can("documents.view") })
   const upcoming = useQuery({ queryKey: ["trips", "upcoming"], queryFn: () => api.get<Page<Trip>>(`/trips/upcoming${qs({ page_size: 5 })}`), enabled: can("trips.view") })
   const queue = useQuery({ queryKey: ["tasks", "my-queue"], queryFn: () => api.get<Task[]>("/tasks/my-queue"), enabled: can("tasks.view") })
   const aging = useQuery({ queryKey: ["invoices", "ar-aging"], queryFn: () => api.get<AgingReport>("/invoices/ar-aging"), enabled: can("invoices.view") })
@@ -36,11 +47,15 @@ export function DashboardPage() {
   return (
     <div>
       <PageHeader title={`Good day, ${user?.full_name.split(" ")[0] ?? ""}`} description="What needs your attention." />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {can("contacts.view") && <Kpi label="Contacts" value={contacts.data?.total ?? "—"} />}
-        {can("trips.view") && <Kpi label="Upcoming trips" value={upcoming.data?.total ?? "—"} hint="confirmed or in progress" />}
-        {can("tasks.view") && <Kpi label="My open tasks" value={queue.data?.length ?? "—"} hint={queue.data?.some((t) => t.due_at && new Date(t.due_at) < new Date()) ? "some overdue" : undefined} />}
-        {can("invoices.view") && <Kpi label="AR outstanding" value={arTotal === null ? "—" : money(arTotal)} hint={aging.data ? `as of ${fmtDate(aging.data.as_of)}` : undefined} />}
+      {/* Every tile is a link to the list it counts. */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {can("clients.view") && <Kpi label="Active clients" value={clients.data?.total ?? "—"} hint="tenants you belong to" to="/clients" />}
+        {can("contacts.view") && <Kpi label="Contacts" value={contacts.data?.total ?? "—"} hint="in your book" to="/contacts" />}
+        {can("trips.view") && <Kpi label="Active trips" value={upcoming.data?.total ?? "—"} hint="confirmed or in progress" to="/trips?status=confirmed" />}
+        {can("empty_legs.view") && <Kpi label="Empty legs" value={emptyLegs.data?.total ?? "—"} hint="available to sell" to="/empty-legs?status=available" />}
+        {can("documents.view") && <Kpi label="Documents expiring" value={expiring.data?.length ?? "—"} hint="in the next 30 days" to="/documents?expiring=30" />}
+        {can("tasks.view") && <Kpi label="Tasks due" value={queue.data?.length ?? "—"} hint={queue.data?.some((t) => t.due_at && new Date(t.due_at) < new Date()) ? "some overdue" : "assigned to you"} to="/tasks?assigned=me" />}
+        {can("invoices.view") && <Kpi label="AR outstanding" value={arTotal === null ? "—" : money(arTotal)} hint={aging.data ? `as of ${fmtDate(aging.data.as_of)}` : undefined} to="/invoices?status=overdue" />}
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
@@ -52,7 +67,7 @@ export function DashboardPage() {
                 <ul className="flex flex-col divide-y">
                   {queue.data.slice(0, 6).map((t) => (
                     <li key={t.id} className="flex items-start justify-between gap-3 py-2 text-sm">
-                      <span className="min-w-0 truncate">{t.title}</span>
+                      <Link to={`/tasks/${t.id}`} className="min-w-0 truncate font-medium hover:underline">{t.title}</Link>
                       <span className="flex shrink-0 items-center gap-2">
                         <Badge variant={t.priority === "urgent" || t.priority === "high" ? "warning" : "secondary"}>{t.priority}</Badge>
                         <span className="text-xs text-muted-foreground">{t.due_at ? ago(t.due_at) : "no due date"}</span>

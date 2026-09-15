@@ -203,7 +203,7 @@ export function ContactDetailPage() {
       >
         <LogActivityButtons contactId={c.id} contactName={c.display_name} />
       </PageHeader>
-      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
+      <Tabs value={tab} onValueChange={(v) => setParams((prev) => { const next = new URLSearchParams(prev); if (v === "overview") next.delete("tab"); else next.set("tab", v); return next }, { replace: true })}>
         <TabsList aria-label="Contact sections">
           {TABS.map((t) => <TabsTrigger key={t.key} value={t.key} data-testid={`tab-${t.key}`}>{t.label}</TabsTrigger>)}
         </TabsList>

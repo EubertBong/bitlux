@@ -7,6 +7,7 @@ import { DashboardPage } from "@/pages/DashboardPage"
 import { ClientListPage } from "@/pages/clients/ClientListPage"
 import { ClientDetailPage } from "@/pages/clients/ClientDetailPage"
 import { NotFoundPage } from "@/pages/NotFoundPage"
+import { ProfilePage } from "@/pages/settings/ProfilePage"
 import { ContactListPage } from "@/pages/contacts/ContactListPage"
 import { ContactDetailPage } from "@/pages/contacts/ContactDetailPage"
 import { EntityFormPage } from "@/components/actions"
@@ -45,6 +46,8 @@ export function App() {
         {RESOURCES.filter((r) => r.detail && !IMPLEMENTED.has(r.path)).map((r) => (
           <Route key={`${r.path}/:id`} path={`${r.path}/:id`} element={gated(r.permission, <ResourceDetailPage resource={r} />)} />
         ))}
+        <Route path="settings" element={<Navigate to="/settings/profile" replace />} />
+        <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="admin" element={<Navigate to="/admin/users" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

@@ -835,3 +835,71 @@ section "+ Add"), tsc and eslint clean. `npm run verify:actions`
 row-menu order, CSV download, detail header, wired vs planned More items, the
 disabled-New tooltip text, the empty state, and the graph tab, with no console
 errors. Screenshots: `docs/screenshots/actions-*.png`.
+
+## 2026-09-15 — Navigation wiring, cursors and hover states
+
+**Prompt (abridged):** Audit every route and every navigation systematically, fix
+the breaks (dashboard KPIs, table primary columns, graph edges and empty state,
+back buttons, tab state in the URL, ⌘K results, sidebar, user menu), add a route
+smoke test; then make everything clickable show a hand cursor with a matching
+hover state, and convert or fix any non-semantic click targets; add
+navigation.test.tsx and cursor.test.tsx.
+
+**The audit.** 49 routes (printed in the handover message); every `<Link>`,
+`navigate()` and `href` call site was checked against that table. Nothing pointed
+at a non-existent path. What was actually broken was narrower and more specific:
+
+- **Dashboard KPI tiles were not links at all.** They are now whole-card links
+  (`<Link data-clickable-card>`), seven of them, each to the list it counts.
+  Two needed views the API had but the UI did not expose, so `/documents?expiring=30`
+  and `/tasks?assigned=me` now map to the existing `/documents/expiring` and
+  `/tasks/my-queue` endpoints and show a removable chip, rather than linking to an
+  unfiltered list and quietly lying about the number.
+- **Back buttons used `history.back()`**, which lands outside the app when a detail
+  page is reached by a deep link or a refresh — exactly when a back button matters.
+  `BackLink` is now a real `<Link>` to the parent list and names it ("Back to Trips").
+  The same fix applied to the create/edit form pages.
+- **Switching tabs replaced the whole query string.** Tabs now merge into the
+  existing params and use `replace`, so `?tab=relationship&foo=bar` keeps `foo` and
+  the tab survives a refresh.
+- **Graph edges were decorative.** An edge is now a keyboard-reachable button that
+  opens the record it points at, with a transparent 12px hit line over the 1.4px
+  hairline. The graph also had **no empty state**: zero nodes rendered a blank
+  canvas. It now explains why and offers the way back, with the list route taken
+  from the entity registry (hand-pluralising gives "aircrafts" and "crew-members").
+- **The user menu had only Sign out.** Profile and Admin were added, and
+  `/settings/profile` is a real page (identity, role, timezone, theme, and the
+  full permission list grouped by resource) rather than a stub.
+- **The login page had no heading element** — its title was a `<div>` — so no page
+  announced itself to assistive tech. `CardTitle` gained `asChild` and the login
+  title is now the page's `<h1>`.
+
+**Cursors.** The rules live in `src/styles/interactive.css` as plain CSS, imported
+by `index.css`. Plain, not Tailwind, so the test can load the shipped file verbatim
+and assert against the real selectors instead of a copy of them. Every rule pairs a
+cursor with a visible hover state: cards lift and take a ring border, rows tint,
+links underline. `aria-disabled` and `:disabled` get `not-allowed`, which is what
+makes the "Planned" buttons from the last sprint read correctly.
+
+**One thing the browser caught that jsdom could not.** `cursor` is an inherited
+property, so every `<span>`, `<svg>` and `<path>` inside a button reports
+`pointer`. The first pass of the "nothing inoperable looks clickable" check
+flagged those as offenders. Both the unit test and the browser check now judge only
+elements with no operable ancestor. The a11y audit itself came back clean: all four
+non-semantic `onClick` sites already had `role`, `tabIndex` and an Enter/Space
+handler, or were `<button>`/`<Link>` already.
+
+**Tests.** `src/test/navigation.test.tsx` renders the real `<App/>` and covers 64
+cases: every sidebar item clicked and asserted to reach a heading, every list and
+detail route in the table, group labels asserted *not* to be links, active-section
+marking, the user menu's three entries, deep-linked tabs, the explicit back link,
+a genuinely unknown path reaching the 404 page with a way out, and a no-console-errors
+pass. `src/test/cursor.test.tsx` adds 6. Frontend total is now 110 tests.
+`npm run verify:nav` (`e2e/nav-shots.mjs`) repeats 25 of these in Chrome, including
+the hover box-shadow actually changing, an edge click navigating, and a ⌘K result
+landing on a detail page.
+
+**Not done, deliberately.** Breadcrumbs. The brief said "from the earlier sprint if
+implemented" — they were never implemented. A full `Home > Clients > Demo Brokerage
+> Contacts > John Smith` trail needs each intermediate record resolved per route;
+the back link covers the real need. Recorded in README's known limitations.

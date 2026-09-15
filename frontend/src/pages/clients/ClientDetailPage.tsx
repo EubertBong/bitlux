@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/common/PageHeader"
+import { BackLink } from "@/components/common/BackLink"
 import { EmptyState, ErrorState, LoadingState } from "@/components/common/States"
 import { RelationshipGraph } from "@/components/RelationshipGraph"
 import { api, ApiError, qs } from "@/lib/api"
@@ -212,6 +213,7 @@ export function ClientDetailPage() {
 
   return (
     <div>
+      <BackLink to="/clients" label="Clients" />
       <PageHeader
         title={<span className="flex items-center gap-3">{c.name} <ClientStatusBadge status={c.status} /></span>}
         description={<span>{c.legal_name ?? c.slug} · {c.timezone}{owner ? <> · Owner: <span className="text-foreground">{owner.full_name}</span></> : null}</span>}
@@ -222,7 +224,7 @@ export function ClientDetailPage() {
           </>
         }
       />
-      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
+      <Tabs value={tab} onValueChange={(v) => setParams((prev) => { const next = new URLSearchParams(prev); if (v === "overview") next.delete("tab"); else next.set("tab", v); return next }, { replace: true })}>
         <TabsList aria-label="Client sections">
           {TABS.map((t) => <TabsTrigger key={t.key} value={t.key} data-testid={`tab-${t.key}`}>{t.label}</TabsTrigger>)}
         </TabsList>
