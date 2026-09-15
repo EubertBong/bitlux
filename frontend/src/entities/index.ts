@@ -1,2 +1,10 @@
 /** Import for side effects: every entity registers itself with the action registry. */
 import "./contact"
+import "./passenger"
+import "./trip"
+import "./aircraft"
+import "./operator"
+import "./quote"
+import "./task"
+import "./emptyLeg"
+import "./light"

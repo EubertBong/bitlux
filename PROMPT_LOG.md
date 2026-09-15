@@ -762,3 +762,76 @@ row-menu Edit showing a non-default status, create (201, toast, list refresh),
 log call (201, appears), edit page (PATCH 200), delete (204) → Undo (restore 200)
 → row back, row-menu delete, no console errors. Screenshots:
 `docs/screenshots/contacts-{empty,list,create,detail-edit}.png`.
+
+## 2026-09-15 — Actions everywhere (Part 1 of the demo-readiness brief)
+
+**Prompt (abridged):** Every list and detail page should carry visible, plausible
+action buttons — wired where the API supports the operation, and *disabled with an
+explanation* where it does not. Standard list header (New, ⋯ Actions, filters,
+search, column chooser, CSV export), row checkbox + ⋯ menu (View / Edit /
+Duplicate / Archive / Delete, in that order), standard detail header (Back, title,
+status, Edit / Delete / ⋯ More) with a per-entity More menu, and "+ Add" on section
+headers. Rule: no button that does nothing without explanation.
+
+**How it was built.** The Sprint-6 registry already described entities; this extends
+it rather than adding page-by-page code. New optional fields on an entity config:
+`icon`, `statuses`, `moreActions`, `sections`, `hideFields`, `readOnly`, and `form`
+became optional. A `MoreAction` is one of four kinds — `patch` (confirm then PATCH,
+or POST to a resource route like `/tasks/{id}/complete`), `dialog` (a small
+ResourceForm that PATCHes or POSTs), `link` (mailto/route), or `planned` (disabled,
+with the reason). `SectionSpec` describes a related collection with an optional
+inline "+ Add" form. The generic `resources.tsx` pages were rewritten from the old
+skeleton into real list/detail pages driven entirely by that data, so every entity
+gained the full vocabulary at once.
+
+**Honesty rules, applied literally.** `PLANNED = "Coming in a future sprint"` is the
+one wording. A disabled control is always wrapped in `<Planned>`, which puts the
+reason in a tooltip *and* a `title` (a disabled button drops pointer events, so the
+wrapper span carries them). Menu items that are planned stay visible, disabled, and
+labelled. Where a reason is specific it says so, e.g. Trips → Generate quote reads
+"Quote-from-trip endpoint is not in the API yet", Aircraft → Upload document reads
+"File upload (S3 presign) is not in the API yet". Nothing shows a "coming soon"
+toast: either it works or it is visibly disabled.
+
+**Wired (API-backed) vs planned.** Forms exist for contacts, passengers, trips,
+aircraft, operators, quotes, tasks and empty legs; those get working New / Edit /
+Duplicate. Entities without a form (airports, crew, bookings, documents, account
+holders, manufacturers, aircraft models, segments, users) keep the buttons but
+disabled; delete still works where the API allows it. The audit log is `readOnly`,
+so even Delete is disabled there. Per-entity More actions that are real: contact
+log-activity / mailto / add-to-segment; passenger add-travel-document (nested POST)
+and mark-inactive; aircraft change-status and assign-operator; operator
+add-safety-rating (nested POST), update-insurance, set-primary-contact; trip
+advance-status (walks draft → sourcing → quoted → confirmed → in_progress →
+completed); quote send / revise (`POST /quotes/{id}/supersede`) / accept / decline;
+invoice send / record-payment (`POST /payments`) / void; task complete
+(`POST /tasks/{id}/complete`) / reassign / snooze / set-due-date; empty leg publish /
+hold / expire.
+
+**Two things added beyond the brief, both to serve its goal.** (1) List ⋯ Actions
+does real work — CSV export of the rows on screen (visible columns only), a column
+chooser, and refresh — rather than being another stub. (2) Detail pages resolved
+`*_id` columns to raw UUID fragments, which reads as plumbing; `lib/fkLabels.ts` now
+looks up only the collections a given record references, skips any the role cannot
+read, and renders a link. "Account Holder: 9543ec19…" became "Halcyon Capital
+Partners".
+
+**Backend.** No new endpoints. Four more list endpoints became searchable
+(`airports`, `documents`, `manufacturers`, `aircraft_models`) by declaring their
+existing `search_type`.
+
+**A test-suite fix worth recording.** Four backend tests asserted the seed's exact
+contact count (`== 8`). The demo database is also clicked through by hand — a
+contact created in the UI made them fail — so they now assert relative to the
+tenant's own count (pagination arithmetic from the reported total, subset checks for
+the segment filter, and a baseline captured before the tenant-isolation write). The
+test intent is unchanged; the brittleness is gone. No demo data was deleted.
+
+**Verification.** 43 backend tests, 40 frontend tests (5 new for the generic pages:
+disabled New with the planned hint, wired New that POSTs, row-menu order and
+disabled states, detail header + More with a wired Complete, planned items and
+section "+ Add"), tsc and eslint clean. `npm run verify:actions`
+(`e2e/actions-shots.mjs`) drives the live app: 14 checks covering header actions,
+row-menu order, CSV download, detail header, wired vs planned More items, the
+disabled-New tooltip text, the empty state, and the graph tab, with no console
+errors. Screenshots: `docs/screenshots/actions-*.png`.

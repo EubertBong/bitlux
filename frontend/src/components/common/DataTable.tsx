@@ -1,6 +1,7 @@
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type OnChangeFn, type SortingState } from "@tanstack/react-table"
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type OnChangeFn, type RowSelectionState, type SortingState, type VisibilityState } from "@tanstack/react-table"
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { LoadingState } from "./States"
 
@@ -16,15 +17,22 @@ export interface DataTableProps<T> {
   isLoading?: boolean
   emptyMessage?: string
   getRowId?: (row: T) => string
+  columnVisibility?: VisibilityState
+  onColumnVisibilityChange?: OnChangeFn<VisibilityState>
+  rowSelection?: RowSelectionState
+  onRowSelectionChange?: OnChangeFn<RowSelectionState>
 }
 
 /** Server-driven TanStack table: sorting and pagination are reported up, not computed here. */
-export function DataTable<T>({ columns, data, total, page, pageSize, onPageChange, sorting = [], onSortingChange, isLoading, emptyMessage = "Nothing to show", getRowId }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, total, page, pageSize, onPageChange, sorting = [], onSortingChange, isLoading, emptyMessage = "Nothing to show", getRowId, columnVisibility, onColumnVisibilityChange, rowSelection, onRowSelectionChange }: DataTableProps<T>) {
   const table = useReactTable({
     data,
     columns,
-    state: { sorting },
+    state: { sorting, columnVisibility: columnVisibility ?? {}, rowSelection: rowSelection ?? {} },
     onSortingChange,
+    onColumnVisibilityChange,
+    onRowSelectionChange,
+    enableRowSelection: Boolean(onRowSelectionChange),
     manualSorting: true,
     manualPagination: true,
     getCoreRowModel: getCoreRowModel(),
@@ -46,8 +54,9 @@ export function DataTable<T>({ columns, data, total, page, pageSize, onPageChang
                 {hg.headers.map((h) => {
                   const sortable = h.column.getCanSort() && onSortingChange
                   const dir = h.column.getIsSorted()
+                  const cls = (h.column.columnDef.meta as { className?: string } | undefined)?.className
                   return (
-                    <TableHead key={h.id}>
+                    <TableHead key={h.id} className={cn(cls)}>
                       {h.isPlaceholder ? null : sortable ? (
                         <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={h.column.getToggleSortingHandler()} aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"}>
                           {flexRender(h.column.columnDef.header, h.getContext())}
@@ -69,9 +78,9 @@ export function DataTable<T>({ columns, data, total, page, pageSize, onPageChang
               </TableRow>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} data-testid="table-row">
+                <TableRow key={row.id} data-testid="table-row" data-state={row.getIsSelected() ? "selected" : undefined}>
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                    <TableCell key={cell.id} className={cn((cell.column.columnDef.meta as { className?: string } | undefined)?.className)}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}
                 </TableRow>
               ))

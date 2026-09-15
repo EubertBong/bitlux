@@ -62,6 +62,7 @@ async def test_list_respects_tenant_scope(session, demo_id):
     """Two tenants in one transaction; each sees only its own rows -- under RLS."""
     contacts = ContactRepository(session)
     other = uuid.uuid5(demo_id, "tenant-b")
+    before = await contacts.count()
 
     async with tenant_transaction(session, other, None):
         await ClientRepository(session).create({"id": other, "slug": "tenant-b", "name": "Tenant B"})
@@ -71,20 +72,22 @@ async def test_list_respects_tenant_scope(session, demo_id):
     # back in the demo tenant
     names = {c.display_name for c in await contacts.list(page_size=500)}
     assert "B Only" not in names
-    assert await contacts.count() == 8
+    # Relative to the tenant's own count: the demo database is also used by hand.
+    assert await contacts.count() == before
 
 
 async def test_tenant_isolation_no_cross_read(session, demo_id):
     """Even if Python's context were wrong, the database side wins."""
     contacts = ContactRepository(session)
-    assert await contacts.count() == 8
+    before = await contacts.count()
+    assert before >= 8
 
     # Point PostgreSQL at another tenant while Python still thinks it is the demo tenant.
     await session.execute(text("SELECT set_config('app.client_id', :cid, true)"), {"cid": str(uuid.uuid4())})
     assert await contacts.list() == []
     assert (await session.execute(select(func.count()).select_from(Contact))).scalar_one() == 0
     await session.execute(text("SELECT set_config('app.client_id', :cid, true)"), {"cid": str(demo_id)})
-    assert await contacts.count() == 8
+    assert await contacts.count() == before
 
 
 async def test_missing_tenant_context_fails_closed(bare_session):

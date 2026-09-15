@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { RequirePermission } from "@/lib/auth"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { EntityFormDialog } from "./EntityFormDialog"
+import { Planned } from "./Planned"
 import { getEntity } from "./registry"
 import { useDeleteEntity } from "./useEntityActions"
 
@@ -23,6 +24,13 @@ export function CreateButton({ entity, mode = "dialog", label, initialValues, on
   const cfg = getEntity(entity)
   const navigate = useNavigate()
   const [open, setOpen] = React.useState(false)
+  if (!cfg.form || cfg.readOnly) {
+    return (
+      <RequirePermission permission={`${cfg.permissionPrefix}.create`} fallback={null}>
+        <Planned><Button disabled data-testid={`create-${entity}`} {...props}><Plus /> {label ?? `New ${cfg.label}`}</Button></Planned>
+      </RequirePermission>
+    )
+  }
   return (
     <RequirePermission permission={`${cfg.permissionPrefix}.create`} fallback={null}>
       <Button onClick={() => (mode === "page" ? navigate(`${cfg.path}/new`) : setOpen(true))} data-testid={`create-${entity}`} {...props}>
@@ -45,6 +53,13 @@ export function EditButton({ entity, id, mode = "dialog", label = "Edit", varian
   const cfg = getEntity(entity)
   const navigate = useNavigate()
   const [open, setOpen] = React.useState(false)
+  if (!cfg.form || cfg.readOnly) {
+    return (
+      <RequirePermission permission={`${cfg.permissionPrefix}.edit`} fallback={null}>
+        <Planned><Button variant={variant} disabled data-testid={`edit-${entity}`} {...props}><Pencil /> {label}</Button></Planned>
+      </RequirePermission>
+    )
+  }
   return (
     <RequirePermission permission={`${cfg.permissionPrefix}.edit`} fallback={null}>
       <Button variant={variant} onClick={() => (mode === "page" ? navigate(`${cfg.path}/${id}/edit`) : setOpen(true))} data-testid={`edit-${entity}`} {...props}>
@@ -69,6 +84,13 @@ export function DeleteButton({ entity, id, name, label = "Delete", variant = "ou
   const cfg = getEntity(entity)
   const [open, setOpen] = React.useState(false)
   const del = useDeleteEntity(entity)
+  if (cfg.readOnly) {
+    return (
+      <RequirePermission permission={`${cfg.permissionPrefix}.delete`} fallback={null}>
+        <Planned><Button variant={variant} disabled data-testid={`delete-${entity}`} {...props}><Trash2 /> {label}</Button></Planned>
+      </RequirePermission>
+    )
+  }
   return (
     <RequirePermission permission={`${cfg.permissionPrefix}.delete`} fallback={null}>
       <Button variant={variant} onClick={() => setOpen(true)} data-testid={`delete-${entity}`} {...props}>

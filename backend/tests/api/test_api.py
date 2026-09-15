@@ -167,12 +167,19 @@ async def test_encrypted_fields_not_in_response(client, broker):
 
 
 async def test_pagination_works(client, broker):
+    """Page arithmetic, relative to whatever the tenant holds: the demo database is
+    also clicked through by hand, so a hard-coded row count is not a safe assertion."""
     p1 = (await client.get(f"{API}/contacts", params={"page": 1, "page_size": 3, "order_by": "display_name"}, headers=broker)).json()
-    assert p1["total"] == 8 and len(p1["items"]) == 3 and (p1["page"], p1["page_size"]) == (1, 3)
-    p3 = (await client.get(f"{API}/contacts", params={"page": 3, "page_size": 3, "order_by": "display_name"}, headers=broker)).json()
-    assert len(p3["items"]) == 2
-    names = [c["display_name"] for c in p1["items"]] + [c["display_name"] for c in p3["items"]]
-    assert names == sorted(names) and len(set(names)) == 5
+    total = p1["total"]
+    assert total >= 8 and len(p1["items"]) == 3 and (p1["page"], p1["page_size"]) == (1, 3)
+    last_page = (total + 2) // 3
+    last = (await client.get(f"{API}/contacts", params={"page": last_page, "page_size": 3, "order_by": "display_name"}, headers=broker)).json()
+    assert len(last["items"]) == total - (last_page - 1) * 3
+    names = [c["display_name"] for c in p1["items"]] + [c["display_name"] for c in last["items"]]
+    assert names == sorted(names) and len(set(names)) == len(names)
+    # Past the end is empty, not an error.
+    beyond = (await client.get(f"{API}/contacts", params={"page": last_page + 1, "page_size": 3}, headers=broker)).json()
+    assert beyond["items"] == [] and beyond["total"] == total
     assert (await client.get(f"{API}/contacts", params={"page_size": 0}, headers=broker)).status_code == 422
     assert (await client.get(f"{API}/contacts", params={"order_by": "password"}, headers=broker)).status_code == 422
 
@@ -181,10 +188,15 @@ async def test_filtering_by_related_entity(client, broker):
     corporate = u("segment:corporate")
     r = await client.get(f"{API}/contacts", params={"segment_id": str(corporate)}, headers=broker)
     assert r.status_code == 200
-    assert {c["display_name"] for c in r.json()["items"]} == {"Halcyon Capital Partners", "Northwind Logistics Inc", "Daniel Okafor"}
-    assert r.json()["total"] == 3
+    body = r.json()
+    # Subset, not equality: hand-created demo rows may share the segment.
+    assert {"Halcyon Capital Partners", "Northwind Logistics Inc", "Daniel Okafor"} <= {c["display_name"] for c in body["items"]}
+    assert all(c["segment_id"] == str(corporate) for c in body["items"])
+    assert body["total"] == len(body["items"])
     r = await client.get(f"{API}/contacts", params={"segment_id": str(corporate), "contact_type": "company"}, headers=broker)
-    assert r.json()["total"] == 2
+    companies = r.json()["items"]
+    assert {"Halcyon Capital Partners", "Northwind Logistics Inc"} <= {c["display_name"] for c in companies}
+    assert all(c["contact_type"] == "company" for c in companies)
     assert (await client.get(f"{API}/contacts", params={"segment_id": "not-a-uuid"}, headers=broker)).status_code == 422
     # a filter on a related entity for trips
     r = await client.get(f"{API}/trips", params={"account_holder_id": str(u("account_holder:halcyon"))}, headers=broker)

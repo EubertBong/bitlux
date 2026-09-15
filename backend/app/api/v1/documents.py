@@ -35,6 +35,7 @@ SPEC = ResourceSpec(
     permission_prefix="documents",
     create_permission='documents.upload',
     encrypted_inputs=(),
+    search_type="documents",
 )
 
 # --- resource-specific routes (before install_crud) ---------------------------

@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/common/PageHeader"
 import { EmptyState, ErrorState, LoadingState } from "@/components/common/States"
 import { RelationshipGraph } from "@/components/RelationshipGraph"
-import { DeleteButton, EditButton } from "@/components/actions"
+import { DeleteButton, EditButton, MoreMenu } from "@/components/actions"
+import { BackLink } from "@/components/common/BackLink"
 import { api } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { ago, fmtDate, fmtDateTime, money, titleCase } from "@/lib/format"
@@ -188,6 +189,7 @@ export function ContactDetailPage() {
 
   return (
     <div>
+      <BackLink to="/contacts" label="Contacts" />
       <PageHeader
         title={<span className="flex items-center gap-3"><Icon className="size-6 text-muted-foreground" aria-hidden />{c.display_name} <ContactStatusBadge status={c.status} /></span>}
         description={[c.job_title, c.contact_type !== "company" ? c.company_name : null, c.primary_email].filter(Boolean).join(" · ") || "No company or email on file"}
@@ -195,6 +197,7 @@ export function ContactDetailPage() {
           <>
             <EditButton entity="contact" id={c.id} mode="page" />
             <DeleteButton entity="contact" id={c.id} name={c.display_name} onDeleted={() => navigate("/contacts")} />
+            <MoreMenu entity="contact" row={c as unknown as Record<string, unknown> & { id: string; status?: string }} />
           </>
         }
       >

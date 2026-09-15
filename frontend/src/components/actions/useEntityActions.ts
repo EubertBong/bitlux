@@ -111,6 +111,7 @@ export function useDuplicateEntity<T extends { id: string }>(kind: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ id }: { id: string }) => {
+      if (!cfg.form) throw new Error(`${cfg.label} has no form; duplicate is not available`)
       const row = await api.get<T>(`${cfg.endpoint}/${id}`)
       const values = cfg.form.duplicate ? cfg.form.duplicate(row) : cfg.form.fromRecord(row)
       return api.post<T>(cfg.endpoint, cfg.form.toPayload(values, "create"))

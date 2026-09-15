@@ -19,6 +19,8 @@ export interface EntityFormDialogProps {
 /** Create or edit any registered entity in a dialog. */
 export function EntityFormDialog({ entity, open, onOpenChange, id, initialValues, onSaved }: EntityFormDialogProps) {
   const cfg = getEntity(entity)
+  const form = cfg.form
+  if (!form) throw new Error(`${cfg.label} has no form`)
   const record = useEntityRecord<{ id: string }>(entity, open && id ? id : undefined)
   const create = useCreateEntity<{ id: string }>(entity)
   const update = useUpdateEntity<{ id: string }>(entity)
@@ -26,11 +28,11 @@ export function EntityFormDialog({ entity, open, onOpenChange, id, initialValues
   // The record becomes the form's defaultValues and the form is keyed on the record, so a
   // (re)load remounts it. react-hook-form's `values` prop resets registered inputs but left
   // Controller-driven selects empty in tests; a fresh mount is unambiguous.
-  const initial = React.useMemo(() => (editing ? (record.data ? cfg.form.fromRecord(record.data) : undefined) : { ...cfg.form.defaults, ...initialValues }), [editing, record.data, cfg, initialValues])
+  const initial = React.useMemo(() => (editing ? (record.data ? form.fromRecord(record.data) : undefined) : { ...form.defaults, ...initialValues }), [editing, record.data, form, initialValues])
   const formKey = editing ? `${id}:${(record.data as { updated_at?: string } | undefined)?.updated_at ?? ""}` : "create"
 
   const onSubmit = async (v: Record<string, unknown>) => {
-    const row = editing ? await update.mutateAsync({ id: id!, payload: cfg.form.toPayload(v, "edit") }) : await create.mutateAsync(cfg.form.toPayload(v, "create"))
+    const row = editing ? await update.mutateAsync({ id: id!, payload: form.toPayload(v, "edit") }) : await create.mutateAsync(form.toPayload(v, "create"))
     onOpenChange(false)
     onSaved?.(row)
   }
@@ -45,9 +47,9 @@ export function EntityFormDialog({ entity, open, onOpenChange, id, initialValues
         {editing && record.isPending ? <LoadingState rows={4} /> : editing && record.isError ? <ErrorState error={record.error} onRetry={() => void record.refetch()} /> : (
           <ResourceForm
             key={formKey}
-            schema={cfg.form.schema}
-            fields={cfg.form.fields}
-            defaultValues={initial ?? cfg.form.defaults}
+            schema={form.schema}
+            fields={form.fields}
+            defaultValues={initial ?? form.defaults}
             onSubmit={onSubmit}
             onCancel={() => onOpenChange(false)}
             submitLabel={editing ? "Save changes" : `Create ${cfg.label.toLowerCase()}`}

@@ -10,6 +10,8 @@ import { useCreateEntity, useEntityRecord, useUpdateEntity } from "./useEntityAc
 /** Full-page create (`/<entity>/new`) and edit (`/<entity>/:id/edit`). Save → detail; Cancel → back. */
 export function EntityFormPage({ entity, mode }: { entity: string; mode: "create" | "edit" }) {
   const cfg = getEntity(entity)
+  const form = cfg.form
+  if (!form) throw new Error(`${cfg.label} has no form`)
   const { id } = useParams()
   const navigate = useNavigate()
   const record = useEntityRecord<{ id: string }>(entity, mode === "edit" ? id : undefined)
@@ -19,7 +21,7 @@ export function EntityFormPage({ entity, mode }: { entity: string; mode: "create
   const permission = `${cfg.permissionPrefix}.${mode === "edit" ? "edit" : "create"}`
 
   const onSubmit = async (v: Record<string, unknown>) => {
-    const row = mode === "edit" ? await update.mutateAsync({ id: id!, payload: cfg.form.toPayload(v, "edit") }) : await create.mutateAsync(cfg.form.toPayload(v, "create"))
+    const row = mode === "edit" ? await update.mutateAsync({ id: id!, payload: form.toPayload(v, "edit") }) : await create.mutateAsync(form.toPayload(v, "create"))
     navigate(`${cfg.path}/${row.id}`)
   }
 
@@ -33,9 +35,9 @@ export function EntityFormPage({ entity, mode }: { entity: string; mode: "create
             {mode === "edit" && record.isPending ? <LoadingState /> : mode === "edit" && record.isError ? <ErrorState error={record.error} onRetry={() => void record.refetch()} /> : (
               <ResourceForm
                 key={mode === "edit" ? `${id}:${(record.data as { updated_at?: string } | undefined)?.updated_at ?? ""}` : "create"}
-                schema={cfg.form.schema}
-                fields={cfg.form.fields}
-                defaultValues={mode === "edit" && record.data ? cfg.form.fromRecord(record.data) : cfg.form.defaults}
+                schema={form.schema}
+                fields={form.fields}
+                defaultValues={mode === "edit" && record.data ? form.fromRecord(record.data) : form.defaults}
                 onSubmit={onSubmit}
                 onCancel={back}
                 submitLabel={mode === "edit" ? "Save changes" : `Create ${cfg.label.toLowerCase()}`}

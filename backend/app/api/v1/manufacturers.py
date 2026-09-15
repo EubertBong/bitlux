@@ -28,6 +28,7 @@ SPEC = ResourceSpec(
     permission_prefix="manufacturers",
     create_permission=None,
     encrypted_inputs=(),
+    search_type="manufacturers",
 )
 
 # --- resource-specific routes (before install_crud) ---------------------------

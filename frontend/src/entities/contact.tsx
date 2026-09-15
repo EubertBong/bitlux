@@ -1,7 +1,8 @@
 /** The Contact entity: form schema, fields, payload mapping, archive semantics. */
 
+import { GitMerge, Mail, MessageSquarePlus, Tags, Users } from "lucide-react"
 import { z } from "zod"
-import { registerEntity, type FieldDef } from "@/components/actions/registry"
+import { registerEntity, type FieldDef, type MoreAction } from "@/components/actions/registry"
 import { useSegmentOptions, useUserOptions } from "@/lib/lookups"
 import { titleCase } from "@/lib/format"
 import type { Contact, ContactStatus } from "@/lib/types"
@@ -115,8 +116,18 @@ export function contactToPayload(v: ContactValues): Record<string, unknown> {
   }
 }
 
+const moreActions: MoreAction[] = [
+  { key: "log-activity", label: "Log activity", icon: MessageSquarePlus, permission: "activities.create", kind: "link", to: (row) => `/contacts/${row.id}?tab=activities` },
+  { key: "email", label: "Send email", icon: Mail, permission: "contacts.view", kind: "link", href: (row) => (typeof row.primary_email === "string" && row.primary_email ? `mailto:${row.primary_email}` : null) },
+  { key: "segment", label: "Add to segment", icon: Tags, permission: "contacts.edit", kind: "dialog", title: "Add to segment", schema: z.object({ segment_id: z.string().optional().or(z.literal("")) }), fields: [{ name: "segment_id", label: "Segment", type: "select", useOptions: useSegmentOptions, emptyLabel: "No segment", span: 2 }], defaults: (row) => ({ segment_id: typeof row.segment_id === "string" ? row.segment_id : "" }), submit: (v, row) => ({ method: "patch", path: `/contacts/${row.id}`, body: { segment_id: v.segment_id ? String(v.segment_id) : null } }), success: "Segment updated" },
+  { key: "merge", label: "Merge", icon: GitMerge, permission: "contacts.edit", kind: "planned", reason: "Merge (re-pointing passengers, trips and activities) is not in the API yet" },
+]
+
 export const contactEntity = registerEntity<Contact, ContactValues>({
   kind: "contact",
+  icon: Users,
+  statuses: CONTACT_STATUSES,
+  moreActions,
   label: "Contact",
   plural: "Contacts",
   endpoint: "/contacts",

@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "screenshots": "node e2e/screenshots.mjs",
     "verify:ui": "node e2e/ui-polish.mjs",
-    "verify:contacts": "node e2e/contacts-shots.mjs"
+    "verify:contacts": "node e2e/contacts-shots.mjs",
+    "verify:actions": "node e2e/actions-shots.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.1.1",
