@@ -45,7 +45,7 @@ export DATABASE_URL='postgresql://<owner>:<pw>@<endpoint>.neon.tech/bitlux_crm?s
 
 make db-check-prod              # SELECT 1: OK ... bitlux_app: MISSING
 export APP_DB_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
-make app-role-prod              # creates bitlux_app; PRINTS the APP_DATABASE_URL for Render -- copy it
+make app-role-prod              # creates bitlux_app + grants your owner membership; PRINTS the APP_DATABASE_URL -- copy it
 make migrate-prod               # alembic upgrade head (001 .. 017)
 make partition-maintenance-prod # 12 months of audit_logs partitions
 make seed-prod                  # optional demo tenant; 5-second Ctrl-C window
@@ -54,6 +54,14 @@ make db-check-prod              # bitlux_app: exists, login=true, bypassrls=fals
 
 Every `*-prod` target refuses to run if `DATABASE_URL` is unset or points at
 localhost, and echoes the target with the password redacted before it acts.
+
+`make app-role-prod` also runs `GRANT bitlux_app TO CURRENT_USER`. The seed and
+verify scripts write tenant data via `SET LOCAL ROLE bitlux_app` so RLS is actually
+exercised; a real superuser may switch to any role, which is why the local stack
+never needed this, but the Neon owner is not a superuser and PostgreSQL only allows
+`SET ROLE` into roles you are a member of. Skip the target and `make seed-prod`
+fails with `permission denied to set role "bitlux_app"`; the fix is the target, or
+`GRANT bitlux_app TO CURRENT_USER;` as the owner. Re-running it is safe.
 
 ## Step 1. Backend on Render
 

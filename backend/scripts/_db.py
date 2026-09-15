@@ -100,7 +100,18 @@ async def enter_tenant(conn: asyncpg.Connection, client_id: uuid.UUID, *, role: 
     """
     info = await role_info(conn)
     if info.current_user != role:
-        await conn.execute(f"SET LOCAL ROLE {role}")
+        try:
+            await conn.execute(f"SET LOCAL ROLE {role}")
+        except asyncpg.InsufficientPrivilegeError:
+            # A superuser may SET ROLE to anything, so this never happens on the
+            # local stack. A non-superuser owner (Neon) must be a *member* first.
+            print(
+                f"\nCannot SET ROLE {role}: the connecting user {info.current_user!r} must be a member of it.\n"
+                f"Run 'make app-role-prod' (it grants membership), or as the owner:\n"
+                f"    GRANT {role} TO CURRENT_USER;\n",
+                file=sys.stderr,
+            )
+            raise
         info = await role_info(conn)
     if not info.rls_enforced:
         raise RuntimeError(

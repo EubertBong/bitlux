@@ -669,3 +669,29 @@ the compose container's bridge address (not localhost, so the guard passes):
 dev password restored afterwards), `migrate-prod`, `partition-maintenance-prod`,
 `seed-prod` with countdown. Local: `make venv`, `migrate`, `partition-maintenance`,
 `seed`, `verify-seed` (ALL PASS), `test` (35 passed) from root and standalone.
+
+## 2026-09-14 — Fix: owner membership in bitlux_app for SET LOCAL ROLE on Neon
+
+**Prompt (abridged):** `make seed-prod` on a fresh Neon database fails with
+`permission denied to set role "bitlux_app"` at `_db.enter_tenant()`. Grant the
+owner membership in `app_role.py`, make the failure message explain itself, add a
+test, note it in DEPLOY.md.
+
+**Why it never showed locally or in CI:** both use a real superuser as the owner,
+and a superuser may `SET ROLE` to anything. Neon's owner is a `neon_superuser`
+member, not a superuser, so PostgreSQL requires explicit membership. (The brief's
+"even a superuser" is not quite right, but the fix is.)
+
+**Change.** `scripts/app_role.py` now exposes `ensure_app_role(conn, password)`
+(create/alter, CONNECT, USAGE, default privileges, `GRANT bitlux_app TO
+CURRENT_USER`, then verifies the state and reports `owner_is_member`); the CLI exits
+1 if the role is not LOGIN / NOBYPASSRLS / member-granted. `enter_tenant()` catches
+`InsufficientPrivilegeError` on `SET LOCAL ROLE`, prints the remedy (`make
+app-role-prod` or the GRANT), and re-raises. New `tests/scripts/test_app_role.py`
+runs as the owner, re-sets the password to the one already in `APP_DATABASE_URL`
+(a no-op, so the rest of the suite is unaffected), asserts an explicit
+`pg_auth_members` row -- `pg_has_role()` is vacuously true for a superuser and
+would have passed before the fix -- proves `SET LOCAL ROLE` works, checks
+idempotency (one membership row after two runs), and checks the printed URL uses
+`postgresql+asyncpg://`. Verified the original error and the new message by
+connecting as a temporary non-superuser owner without membership, then with it.
